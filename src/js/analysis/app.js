@@ -7,6 +7,7 @@ import {
 import { loadGPX } from './gpx-loader.js';
 import {
   computeDistances, computeGradDist, computeGradientSections,
+  loadAnalysisSettings, processTrackData,
 } from './track-processor.js';
 import { initMap } from './map-init.js';
 import { createSegments, rebuildSegmentColors, applyVisibility } from './map-segments.js';
@@ -24,6 +25,12 @@ async function main() {
 
   // Compute distances once (independent of settings)
   const totalDist = computeDistances(points);
+
+  // Pre-compute smoothed elevations and gradients up front — downstream
+  // setup (createGradientMarkers, createSegments, computeGradientSections,
+  // profile rendering) reads points[i].gradient / points[i].eleSmooth.
+  // initSettings will re-run processTrackData when the user adjusts a slider.
+  processTrackData(points, loadAnalysisSettings());
 
   // Gradient sections (mutable ref so hover panel sees updates)
   const gradSectionsRef = { current: computeGradientSections(points) };
