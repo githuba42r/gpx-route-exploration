@@ -2,15 +2,63 @@
 
 function initMap(points, stats) {
   const map = L.map('map', { zoomControl: true }).setView([points[0].lat, points[0].lon], 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+
+  // --- Tile layers ---
+  const osmStandard = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19
-  }).addTo(map);
+  });
+
+  const osmCycle = L.tileLayer('https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors &amp; CyclOSM',
+    maxZoom: 20
+  });
+
+  const openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap',
+    maxZoom: 17
+  });
+
+  const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+    maxZoom: 19
+  });
+
+  // Default layer
+  osmStandard.addTo(map);
+
+  // --- Overlays ---
+  const waymarkedTrails = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png', {
+    attribution: '&copy; Waymarked Trails',
+    maxZoom: 18,
+    opacity: 0.7
+  });
+
+  const waymarkedCycling = L.tileLayer('https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png', {
+    attribution: '&copy; Waymarked Trails',
+    maxZoom: 18,
+    opacity: 0.7
+  });
+
+  // Layer control
+  const baseLayers = {
+    'OSM Standard': osmStandard,
+    'CyclOSM (Bicycle)': osmCycle,
+    'OpenTopoMap (Contours)': openTopo,
+    'Satellite': esriSatellite,
+  };
+
+  const overlays = {
+    'Hiking Trails': waymarkedTrails,
+    'Cycling Routes': waymarkedCycling,
+  };
+
+  L.control.layers(baseLayers, overlays, { position: 'topleft', collapsed: true }).addTo(map);
 
   // Base route line (thin, always visible, neutral colour)
   const baseRoute = L.polyline(
     points.map(p => [p.lat, p.lon]),
-    { color: '#555555', weight: 2, opacity: 0.6 }
+    { color: '#39ff14', weight: 2, opacity: 0.7 }
   ).addTo(map);
 
   // Draw colored gradient overlay segments

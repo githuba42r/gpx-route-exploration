@@ -81,7 +81,7 @@ function initProfile(points, stats, mapObj) {
         ctx.strokeStyle = gradientColor(points[i].gradient);
         ctx.lineWidth = 1.5;
       } else {
-        ctx.strokeStyle = '#555555';
+        ctx.strokeStyle = '#39ff14';
         ctx.lineWidth = 1;
       }
       ctx.beginPath();
