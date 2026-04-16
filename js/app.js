@@ -8,23 +8,82 @@ async function main() {
 
   document.getElementById('track-name').textContent = trackName;
 
-  const stats = processTrackData(points);
-  const { totalDist, minEle, maxEle, totalGain, totalLoss, maxGrad, minGrad } = stats;
+  // Compute distances once (independent of settings)
+  const totalDist = computeDistances(points);
 
-  // Render stats bar
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="value">${(totalDist/1000).toFixed(1)} km</div><div class="label">Distance</div></div>
-    <div class="stat"><div class="value">${minEle.toFixed(0)}m</div><div class="label">Min Elevation</div></div>
-    <div class="stat"><div class="value">${maxEle.toFixed(0)}m</div><div class="label">Max Elevation</div></div>
-    <div class="stat"><div class="value">${totalGain.toFixed(0)}m</div><div class="label">Total Climb</div></div>
-    <div class="stat"><div class="value">${totalLoss.toFixed(0)}m</div><div class="label">Total Descent</div></div>
-    <div class="stat"><div class="value">${maxGrad.toFixed(1)}%</div><div class="label">Max Gradient</div></div>
-    <div class="stat"><div class="value">${minGrad.toFixed(1)}%</div><div class="label">Steepest Descent</div></div>
-  `;
-  document.getElementById('track-subtitle').textContent =
-    `${points.length} trackpoints | Elevation ${minEle.toFixed(0)}m \u2014 ${maxEle.toFixed(0)}m | Smoothed (7-pt) | Gradient over 100m window`;
+  // Current analysis settings
+  let settings = loadAnalysisSettings();
+  let stats = processTrackData(points, settings);
 
-  // Visibility state
+  // --- Settings controls ---
+  const smoothSlider = document.getElementById('set-smooth');
+  const smoothVal = document.getElementById('set-smooth-val');
+  const gradDistSlider = document.getElementById('set-graddist');
+  const gradDistVal = document.getElementById('set-graddist-val');
+  const presetSelect = document.getElementById('set-preset');
+
+  const PRESETS = {
+    raw:     { smoothWindow: 1,  gradientDist: 0 },
+    detail:  { smoothWindow: 3,  gradientDist: 25 },
+    default: { smoothWindow: 7,  gradientDist: 100 },
+    smooth:  { smoothWindow: 15, gradientDist: 200 },
+  };
+
+  function updateSettingsUI() {
+    smoothSlider.value = settings.smoothWindow;
+    smoothVal.textContent = settings.smoothWindow + ' pt';
+    gradDistSlider.value = settings.gradientDist;
+    gradDistVal.textContent = settings.gradientDist + 'm';
+
+    // Match preset or show custom
+    const match = Object.entries(PRESETS).find(([, v]) =>
+      v.smoothWindow === settings.smoothWindow && v.gradientDist === settings.gradientDist
+    );
+    presetSelect.value = match ? match[0] : '';
+  }
+
+  function applySettings(newSettings) {
+    settings = newSettings;
+    saveAnalysisSettings(settings);
+    stats = processTrackData(points, settings);
+    updateSettingsUI();
+    refreshAll();
+  }
+
+  smoothSlider.addEventListener('input', () => {
+    applySettings({ ...settings, smoothWindow: parseInt(smoothSlider.value) });
+  });
+
+  gradDistSlider.addEventListener('input', () => {
+    applySettings({ ...settings, gradientDist: parseInt(gradDistSlider.value) });
+  });
+
+  presetSelect.addEventListener('change', () => {
+    const preset = PRESETS[presetSelect.value];
+    if (preset) applySettings({ ...preset });
+  });
+
+  updateSettingsUI();
+
+  // --- Render stats ---
+  function renderStats() {
+    const { minEle, maxEle, totalGain, totalLoss, maxGrad, minGrad } = stats;
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="value">${(totalDist/1000).toFixed(1)} km</div><div class="label">Distance</div></div>
+      <div class="stat"><div class="value">${minEle.toFixed(0)}m</div><div class="label">Min Elevation</div></div>
+      <div class="stat"><div class="value">${maxEle.toFixed(0)}m</div><div class="label">Max Elevation</div></div>
+      <div class="stat"><div class="value">${totalGain.toFixed(0)}m</div><div class="label">Total Climb</div></div>
+      <div class="stat"><div class="value">${totalLoss.toFixed(0)}m</div><div class="label">Total Descent</div></div>
+      <div class="stat"><div class="value">${maxGrad.toFixed(1)}%</div><div class="label">Max Gradient</div></div>
+      <div class="stat"><div class="value">${minGrad.toFixed(1)}%</div><div class="label">Steepest Descent</div></div>
+    `;
+    const winLabel = settings.gradientDist > 0 ? settings.gradientDist + 'm window' : 'point-to-point';
+    document.getElementById('track-subtitle').textContent =
+      `${points.length} trackpoints | Elevation ${stats.minEle.toFixed(0)}m \u2014 ${stats.maxEle.toFixed(0)}m | Smoothing: ${settings.smoothWindow}-pt | Gradient: ${winLabel}`;
+  }
+  renderStats();
+
+  // --- Visibility state ---
   function resetVisibility() {
     rangeVisible = {};
     activeRanges().forEach(r => {
@@ -40,7 +99,7 @@ async function main() {
   const mapObj = initMap(points, stats);
   const { map, segmentLayers, baseRoute } = mapObj;
 
-  // Rebuild segment colors on mode switch
+  // Rebuild segment colors and sections
   function rebuildSegmentColors() {
     segmentLayers.forEach(line => {
       const g = points[line._pointIndex].gradient;
@@ -124,10 +183,20 @@ async function main() {
     legendEl.appendChild(hideBtn);
   }
 
+  // Full refresh when settings change
+  function refreshAll() {
+    renderStats();
+    rebuildSegmentColors();
+    resetVisibility();
+    applyVisibility();
+    renderLegend();
+  }
+
   renderLegend();
 
-  // Init map hover panel
+  // Init map hover panel and context menu
   initMapHoverPanel(map, points, segmentLayers, baseRoute, gradSectionsRef);
+  initContextMenu(map, points, gradSectionsRef);
 
   // Apply initial visibility (after profile canvas is ready)
   applyVisibility();

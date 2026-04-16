@@ -56,13 +56,23 @@ async function loadGPX() {
   return { points, trackName };
 }
 
-function processTrackData(points) {
-  // Smooth elevations
-  const rawEles = points.map(p => p.ele);
-  const smoothed = smoothElevations(rawEles, 7);
-  points.forEach((p, i) => p.eleSmooth = smoothed[i]);
+// Default analysis settings
+const ANALYSIS_DEFAULTS = { smoothWindow: 7, gradientDist: 100 };
+const ANALYSIS_STORAGE_KEY = 'gpx-analysis-settings';
 
-  // Calculate cumulative distance
+function loadAnalysisSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ANALYSIS_STORAGE_KEY));
+    return { ...ANALYSIS_DEFAULTS, ...saved };
+  } catch { return { ...ANALYSIS_DEFAULTS }; }
+}
+
+function saveAnalysisSettings(settings) {
+  localStorage.setItem(ANALYSIS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+// Cumulative distances only need computing once (they don't change with settings)
+function computeDistances(points) {
   let cumDist = 0;
   points[0].dist = 0;
   for (let i = 1; i < points.length; i++) {
@@ -70,19 +80,28 @@ function processTrackData(points) {
     cumDist += d;
     points[i].dist = cumDist;
   }
+  return cumDist;
+}
 
-  // Calculate gradient over a minimum distance window (~100m)
-  const MIN_GRADIENT_DIST = 100;
+function processTrackData(points, settings) {
+  const { smoothWindow, gradientDist } = settings || loadAnalysisSettings();
+
+  // Smooth elevations
+  const rawEles = points.map(p => p.ele);
+  const smoothed = smoothElevations(rawEles, smoothWindow);
+  points.forEach((p, i) => p.eleSmooth = smoothed[i]);
+
+  // Calculate gradient over minimum distance window
   points[0].gradient = 0;
   for (let i = 1; i < points.length; i++) {
     let j = i - 1;
-    while (j > 0 && (points[i].dist - points[j].dist) < MIN_GRADIENT_DIST) j--;
+    while (j > 0 && (points[i].dist - points[j].dist) < gradientDist) j--;
     const dDist = points[i].dist - points[j].dist;
     points[i].gradient = dDist > 1 ? ((points[i].eleSmooth - points[j].eleSmooth) / dDist) * 100 : 0;
   }
 
   // Compute stats
-  const totalDist = cumDist;
+  const totalDist = points[points.length - 1].dist;
   const minEle = Math.min(...rawEles);
   const maxEle = Math.max(...rawEles);
   let totalGain = 0, totalLoss = 0;

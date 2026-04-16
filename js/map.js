@@ -1,7 +1,9 @@
 // --- Leaflet map setup, segments, markers, hover panel ---
 
 function initMap(points, stats) {
-  const map = L.map('map', { zoomControl: true }).setView([points[0].lat, points[0].lon], 13);
+  // Restore saved map view or use default
+  const savedView = JSON.parse(localStorage.getItem('gpx-map-view') || 'null');
+  const map = L.map('map', { zoomControl: true });
 
   // --- Tile layers ---
   const osmStandard = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -24,9 +26,6 @@ function initMap(points, stats) {
     maxZoom: 19
   });
 
-  // Default layer
-  osmStandard.addTo(map);
-
   // --- Overlays ---
   const waymarkedTrails = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png', {
     attribution: '&copy; Waymarked Trails',
@@ -48,17 +47,41 @@ function initMap(points, stats) {
     'Satellite': esriSatellite,
   };
 
-  const overlays = {
+  const overlayLayers = {
     'Hiking Trails': waymarkedTrails,
     'Cycling Routes': waymarkedCycling,
   };
 
-  L.control.layers(baseLayers, overlays, { position: 'topleft', collapsed: true }).addTo(map);
+  // Restore saved layer preferences from localStorage
+  const savedBase = localStorage.getItem('gpx-map-base-layer');
+  const savedOverlays = JSON.parse(localStorage.getItem('gpx-map-overlays') || '[]');
+
+  const activeBase = (savedBase && baseLayers[savedBase]) ? baseLayers[savedBase] : osmStandard;
+  activeBase.addTo(map);
+
+  savedOverlays.forEach(name => {
+    if (overlayLayers[name]) overlayLayers[name].addTo(map);
+  });
+
+  L.control.layers(baseLayers, overlayLayers, { position: 'topleft', collapsed: true }).addTo(map);
+
+  // Persist layer changes
+  map.on('baselayerchange', (e) => {
+    localStorage.setItem('gpx-map-base-layer', e.name);
+  });
+  map.on('overlayadd', () => {
+    const active = Object.keys(overlayLayers).filter(n => map.hasLayer(overlayLayers[n]));
+    localStorage.setItem('gpx-map-overlays', JSON.stringify(active));
+  });
+  map.on('overlayremove', () => {
+    const active = Object.keys(overlayLayers).filter(n => map.hasLayer(overlayLayers[n]));
+    localStorage.setItem('gpx-map-overlays', JSON.stringify(active));
+  });
 
   // Base route line (thin, always visible, neutral colour)
   const baseRoute = L.polyline(
     points.map(p => [p.lat, p.lon]),
-    { color: '#39ff14', weight: 2, opacity: 0.7 }
+    { color: '#ff5f15', weight: 2, opacity: 0.7 }
   ).addTo(map);
 
   // Draw colored gradient overlay segments
@@ -122,9 +145,21 @@ function initMap(points, stats) {
     `Distance: ${(dp.dist/1000).toFixed(2)} km`
   );
 
-  // Fit bounds
-  const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
-  map.fitBounds(bounds, { padding: [30, 30] });
+  // Restore saved view or fit to track bounds
+  if (savedView) {
+    map.setView([savedView.lat, savedView.lng], savedView.zoom);
+  } else {
+    const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
+    map.fitBounds(bounds, { padding: [30, 30] });
+  }
+
+  // Persist map view on move/zoom
+  map.on('moveend', () => {
+    const c = map.getCenter();
+    localStorage.setItem('gpx-map-view', JSON.stringify({
+      lat: c.lat, lng: c.lng, zoom: map.getZoom()
+    }));
+  });
 
   // Position marker (synced with profile hover)
   const posMarker = L.circleMarker([points[0].lat, points[0].lon], {
