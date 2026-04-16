@@ -8,7 +8,7 @@ import { findNearbyPeakGradient, clearModalMarkers, addModalMarker } from './con
  * Show the gradient info modal for a right-clicked location.
  */
 export function showGradientModal(map, points, gradSectionsRef, shared) {
-  clearModalMarkers(shared);
+  clearModalMarkers(map, shared);
 
   const latlng = shared.ctxLatLng;
   const ptIdx = shared.ctxNearestIdx;
@@ -107,14 +107,14 @@ export function showGradientModal(map, points, gradSectionsRef, shared) {
 
   // Wire close handlers (idempotent — remove old listeners first)
   const modalClose = document.getElementById('gm-close');
-  const closeFn = () => closeGradientModal(shared);
+  const closeFn = () => closeGradientModal(map, shared);
   modalClose.onclick = closeFn;
   modalOverlay.onclick = (e) => {
     if (e.target === modalOverlay) closeFn();
   };
 }
 
-export function closeGradientModal(shared) {
+export function closeGradientModal(map, shared) {
   document.getElementById('grad-modal-overlay').classList.remove('visible');
-  clearModalMarkers(shared);
+  clearModalMarkers(map, shared);
 }

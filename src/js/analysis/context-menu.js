@@ -57,8 +57,8 @@ export function findNearbyPeakGradient(points, latlng) {
   };
 }
 
-export function clearModalMarkers(shared) {
-  shared.modalMarkers.forEach(m => m._map && m._map.removeLayer(m));
+export function clearModalMarkers(map, shared) {
+  shared.modalMarkers.forEach(m => map.removeLayer(m));
   shared.modalMarkers = [];
 }
 

@@ -38,9 +38,9 @@ async function main() {
   // --- Visibility state ---
   resetRangeVisible();
 
-  // --- Profile ---
-  const profileApi = initProfile(points, { minEle: 0, maxEle: 0 }, map, posMarker);
-  // Stats will be set properly by initSettings below; we need profileApi first
+  // profileApi is assigned after settings init (refreshAll is only called
+  // when a slider fires, never during initSettings itself)
+  let profileApi;
 
   // --- Full refresh callback (called by settings and legend) ---
   function refreshAll() {
@@ -54,11 +54,8 @@ async function main() {
   // --- Settings ---
   const settingsApi = initSettings(points, refreshAll);
 
-  // Now re-init profile with correct stats
-  const statsNow = settingsApi.getStats();
-  const realProfileApi = initProfile(points, statsNow, map, posMarker);
-  // Patch profileApi reference so applyVisibility uses the real one
-  profileApi.drawProfile = realProfileApi.drawProfile;
+  // --- Profile (init once with correct stats) ---
+  profileApi = initProfile(points, settingsApi.getStats(), map, posMarker);
 
   // --- Stats rendering ---
   function renderStats() {

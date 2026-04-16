@@ -129,7 +129,7 @@ function buildTerrainMiniMap(latlng, terrain, steepest) {
 }
 
 function showTerrainModal(map, latlng, terrain, shared) {
-  clearModalMarkers(shared);
+  clearModalMarkers(map, shared);
 
   const { centerEle, directions } = terrain;
   const steepest = directions.reduce((a, b) => a.absGradient > b.absGradient ? a : b);
@@ -172,9 +172,9 @@ function showTerrainModal(map, latlng, terrain, shared) {
   buildTerrainMiniMap(latlng, terrain, steepest);
 }
 
-function closeTerrainModal(shared) {
+function closeTerrainModal(map, shared) {
   document.getElementById('terrain-modal-overlay').classList.remove('visible');
-  clearModalMarkers(shared);
+  clearModalMarkers(map, shared);
   if (terrainMiniMap) {
     terrainMiniMap.remove();
     terrainMiniMap = null;
@@ -193,20 +193,20 @@ export function initTerrainGradient(map, points, shared, hideCtxMenu) {
     if (!shared.ctxLatLng) { hideCtxMenu(); return; }
     hideCtxMenu();
 
-    clearModalMarkers(shared);
+    clearModalMarkers(map, shared);
     addModalMarker(map, shared, shared.ctxLatLng.lat, shared.ctxLatLng.lng, '#ffee58', 'Sampling...');
 
     try {
       const terrain = await sampleTerrainElevations(shared.ctxLatLng.lat, shared.ctxLatLng.lng);
       showTerrainModal(map, shared.ctxLatLng, terrain, shared);
     } catch (err) {
-      clearModalMarkers(shared);
+      clearModalMarkers(map, shared);
       alert('Terrain gradient failed: ' + err.message);
     }
   });
 
-  terrainClose.addEventListener('click', () => closeTerrainModal(shared));
+  terrainClose.addEventListener('click', () => closeTerrainModal(map, shared));
   terrainOverlay.addEventListener('click', (e) => {
-    if (e.target === terrainOverlay) closeTerrainModal(shared);
+    if (e.target === terrainOverlay) closeTerrainModal(map, shared);
   });
 }
