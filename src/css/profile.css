@@ -1,4 +1,29 @@
-#profile-container { height: 220px; background: #16213e; border-top: 2px solid #0f3460; position: relative; }
-#profile-canvas { width: 100%; height: 100%; }
+#profile-container { height: 220px; background: #16213e; border-top: 2px solid #0f3460; position: relative; user-select: none; }
+#profile-canvas { width: 100%; height: 100%; cursor: crosshair; }
 #hover-info { position: absolute; top: 8px; right: 8px; background: rgba(22,33,62,0.95); padding: 10px 14px; border-radius: 6px; font-size: 0.8em; border: 1px solid #0f3460; z-index: 1000; pointer-events: none; display: none; }
 #hover-info .hi-val { font-weight: 700; color: #ff9f43; }
+
+.profile-selection {
+  position: absolute;
+  background: rgba(0, 229, 255, 0.18);
+  border-left: 1px solid #00e5ff;
+  border-right: 1px solid #00e5ff;
+  pointer-events: none;
+  z-index: 900;
+}
+
+.profile-reset-zoom {
+  position: absolute;
+  top: 8px;
+  left: 60px;
+  background: #0f3460;
+  color: #e6edf5;
+  border: 1px solid #00e5ff;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.75em;
+  font-family: inherit;
+  cursor: pointer;
+  z-index: 1001;
+}
+.profile-reset-zoom:hover { background: #1a4a80; }

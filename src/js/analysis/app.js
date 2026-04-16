@@ -12,6 +12,7 @@ import {
 import { initMap } from './map-init.js';
 import { createSegments, rebuildSegmentColors, applyVisibility } from './map-segments.js';
 import { createStartEndMarkers, createGradientMarkers, createPosMarker } from './map-markers.js';
+import { createHighlight } from './map-highlight.js';
 import { initMapHoverPanel } from './map-hover.js';
 import { initProfile } from './profile.js';
 import { initContextMenu } from './context-menu.js';
@@ -61,8 +62,21 @@ async function main() {
   // --- Settings ---
   const settingsApi = initSettings(points, refreshAll);
 
+  // --- Selection highlight on the map ---
+  const highlight = createHighlight(map, points);
+
   // --- Profile (init once with correct stats) ---
-  profileApi = initProfile(points, settingsApi.getStats(), map, posMarker);
+  // When the user drag-selects a range on the profile, highlight the matching
+  // section on the map and pan to it. Reset → clear highlight.
+  profileApi = initProfile(points, settingsApi.getStats(), map, posMarker, (sel) => {
+    if (!sel) {
+      highlight.clear();
+      return;
+    }
+    highlight.setRange(sel);
+    const mid = Math.floor((sel.idxStart + sel.idxEnd) / 2);
+    map.panTo([points[mid].lat, points[mid].lon]);
+  });
 
   // --- Stats rendering ---
   function renderStats() {

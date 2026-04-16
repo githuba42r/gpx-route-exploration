@@ -2,23 +2,80 @@
 
 import { useAbsoluteMode, gradToAngle, gradientColor, rangeForGradient, rangeVisible } from './gradient.js';
 
-/**
- * Initialize the elevation profile canvas with hover/click interaction.
- * Returns { drawProfile } API for external redraws (e.g. visibility changes).
- */
-export function initProfile(points, stats, map, posMarker) {
-  const { minEle, maxEle } = stats;
+// Drag threshold in pixels — drags shorter than this are treated as clicks
+// (keeping the existing "click to pan map" behavior).
+const DRAG_THRESHOLD_PX = 5;
+// Minimum selection width in metres — narrower selections are treated as clicks.
+const MIN_SELECTION_M = 50;
 
+/**
+ * Initialize the elevation profile canvas with hover/click interaction,
+ * plus drag-to-zoom selection with map highlighting.
+ *
+ * @param {Array}    points
+ * @param {Object}   stats     { minEle, maxEle, ... } from processTrackData
+ * @param {Object}   map       Leaflet map (for panTo on click)
+ * @param {Object}   posMarker Position marker (synced with hover)
+ * @param {Function} onSelectionChange  Called with {idxStart, idxEnd, distMin, distMax}
+ *                                      when a zoom selection is made, and with
+ *                                      null when the view is reset.
+ * @returns {Object} { drawProfile, setViewRange, clearViewRange, isZoomed }
+ */
+export function initProfile(points, stats, map, posMarker, onSelectionChange) {
   const canvas = document.getElementById('profile-canvas');
   const ctx = canvas.getContext('2d');
   const hoverInfo = document.getElementById('hover-info');
+  const container = document.getElementById('profile-container');
+
+  const totalDist = points[points.length - 1].dist;
+  // Active view range — defaults to the full track.
+  let viewRange = { distMin: 0, distMax: totalDist };
+
+  // --- Selection overlay (absolute <div> over the canvas) ---
+  let selectionOverlay = container.querySelector('.profile-selection');
+  if (!selectionOverlay) {
+    selectionOverlay = document.createElement('div');
+    selectionOverlay.className = 'profile-selection';
+    selectionOverlay.style.display = 'none';
+    container.appendChild(selectionOverlay);
+  }
+
+  // --- Reset-zoom button ---
+  let resetBtn = container.querySelector('.profile-reset-zoom');
+  if (!resetBtn) {
+    resetBtn = document.createElement('button');
+    resetBtn.className = 'profile-reset-zoom';
+    resetBtn.type = 'button';
+    resetBtn.textContent = 'Reset Zoom';
+    resetBtn.style.display = 'none';
+    container.appendChild(resetBtn);
+  }
+  resetBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearViewRange();
+  });
+
+  // --- Elevation range helpers ---
+  function eleBoundsForRange(distMin, distMax) {
+    let lo = Infinity, hi = -Infinity;
+    for (const p of points) {
+      if (p.dist < distMin || p.dist > distMax) continue;
+      const e = p.eleSmooth != null ? p.eleSmooth : p.ele;
+      if (e < lo) lo = e;
+      if (e > hi) hi = e;
+    }
+    // Fallback — if no points in range (shouldn't happen with a valid range),
+    // use the initial stats.
+    if (!isFinite(lo) || !isFinite(hi)) return { minEle: stats.minEle, maxEle: stats.maxEle };
+    return { minEle: lo, maxEle: hi };
+  }
 
   function drawProfile() {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const W = rect.width;
     const H = rect.height;
@@ -26,19 +83,21 @@ export function initProfile(points, stats, map, posMarker) {
     const plotW = W - padL - padR;
     const plotH = H - padT - padB;
 
-    const maxDist = points[points.length - 1].dist;
-    const eleMin = minEle - 10;
-    const eleMax = maxEle + 20;
+    const { distMin, distMax } = viewRange;
+    const distSpan = Math.max(1, distMax - distMin);
+    const { minEle: vMinEle, maxEle: vMaxEle } = eleBoundsForRange(distMin, distMax);
+    const eleMin = vMinEle - 10;
+    const eleMax = vMaxEle + 20;
     const eleRange = eleMax - eleMin;
 
-    function xFor(dist) { return padL + (dist / maxDist) * plotW; }
+    function xFor(dist) { return padL + ((dist - distMin) / distSpan) * plotW; }
     function yFor(ele) { return padT + plotH - ((ele - eleMin) / eleRange) * plotH; }
 
     // Background
     ctx.fillStyle = '#16213e';
     ctx.fillRect(0, 0, W, H);
 
-    // Grid lines
+    // Grid — elevation
     ctx.strokeStyle = '#1a2a4a';
     ctx.lineWidth = 0.5;
     const eleStep = eleRange > 300 ? 100 : eleRange > 150 ? 50 : 25;
@@ -51,20 +110,32 @@ export function initProfile(points, stats, map, posMarker) {
       ctx.fillText(`${e}m`, padL - 4, y + 3);
     }
 
-    const distStep = maxDist > 40000 ? 10000 : maxDist > 20000 ? 5000 : 2000;
-    for (let d = 0; d <= maxDist; d += distStep) {
+    // Grid — distance
+    const distStep = distSpan > 40000 ? 10000
+                  : distSpan > 20000 ? 5000
+                  : distSpan > 5000  ? 2000
+                  : distSpan > 1000  ? 500
+                  : 100;
+    const firstTick = Math.ceil(distMin / distStep) * distStep;
+    for (let d = firstTick; d <= distMax; d += distStep) {
       const x = xFor(d);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
       ctx.fillStyle = '#6a7a9a';
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${(d / 1000).toFixed(0)} km`, x, H - padB + 14);
+      const label = distStep >= 1000
+        ? `${(d / 1000).toFixed(0)} km`
+        : `${(d / 1000).toFixed(1)} km`;
+      ctx.fillText(label, x, H - padB + 14);
     }
 
-    // Filled profile with gradient coloring (respects visibility toggle)
+    // Profile — filled + outlined, clipped to the view range
     for (let i = 1; i < points.length; i++) {
-      const x1 = xFor(points[i - 1].dist);
-      const x2 = xFor(points[i].dist);
+      const d1 = points[i - 1].dist;
+      const d2 = points[i].dist;
+      if (d2 < distMin || d1 > distMax) continue;
+      const x1 = xFor(d1);
+      const x2 = xFor(d2);
       const y1 = yFor(points[i - 1].eleSmooth);
       const y2 = yFor(points[i].eleSmooth);
       const yBase = yFor(eleMin);
@@ -93,27 +164,62 @@ export function initProfile(points, stats, map, posMarker) {
       ctx.stroke();
     }
 
-    return { W, H, padL, padR, padT, padB, plotW, plotH, maxDist, eleMin, eleRange, xFor, yFor };
+    return { W, H, padL, padR, padT, padB, plotW, plotH, distMin, distMax, distSpan, eleMin, eleRange, xFor, yFor };
   }
 
   let profileParams = drawProfile();
   window.addEventListener('resize', () => { profileParams = drawProfile(); });
 
-  const profileApi = { drawProfile: () => { profileParams = drawProfile(); } };
+  // --- View-range API ---
+  function findIdxAtOrAfter(dist) {
+    for (let i = 0; i < points.length; i++) if (points[i].dist >= dist) return i;
+    return points.length - 1;
+  }
+  function findIdxAtOrBefore(dist) {
+    for (let i = points.length - 1; i >= 0; i--) if (points[i].dist <= dist) return i;
+    return 0;
+  }
 
-  // Hover interaction
-  const profileContainer = document.getElementById('profile-container');
-  profileContainer.addEventListener('mousemove', (e) => {
+  function setViewRange({ distMin, distMax }) {
+    distMin = Math.max(0, Math.min(totalDist, distMin));
+    distMax = Math.max(0, Math.min(totalDist, distMax));
+    if (distMax - distMin < MIN_SELECTION_M) return;
+    viewRange = { distMin, distMax };
+    profileParams = drawProfile();
+    resetBtn.style.display = 'block';
+    if (onSelectionChange) {
+      onSelectionChange({
+        distMin, distMax,
+        idxStart: findIdxAtOrAfter(distMin),
+        idxEnd: findIdxAtOrBefore(distMax),
+      });
+    }
+  }
+
+  function clearViewRange() {
+    viewRange = { distMin: 0, distMax: totalDist };
+    profileParams = drawProfile();
+    resetBtn.style.display = 'none';
+    if (onSelectionChange) onSelectionChange(null);
+  }
+
+  // --- Hover ---
+  function distAtClientX(clientX) {
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const { padL, plotW, maxDist } = profileParams;
+    const mx = clientX - rect.left;
+    const { padL, plotW, distMin, distSpan } = profileParams;
+    return distMin + ((mx - padL) / plotW) * distSpan;
+  }
 
-    const dist = ((mx - padL) / plotW) * maxDist;
-    if (dist < 0 || dist > maxDist) { hoverInfo.style.display = 'none'; return; }
+  container.addEventListener('mousemove', (e) => {
+    if (dragState) return; // handled by drag handler
+    const { distMin, distMax } = profileParams;
+    const dist = distAtClientX(e.clientX);
+    if (dist < distMin || dist > distMax) { hoverInfo.style.display = 'none'; return; }
 
-    let closest = 0;
-    let minD = Infinity;
+    let closest = 0, minD = Infinity;
     for (let i = 0; i < points.length; i++) {
+      if (points[i].dist < distMin || points[i].dist > distMax) continue;
       const d = Math.abs(points[i].dist - dist);
       if (d < minD) { minD = d; closest = i; }
     }
@@ -134,24 +240,112 @@ export function initProfile(points, stats, map, posMarker) {
     posMarker.setStyle({ opacity: 1, fillOpacity: 1 });
   });
 
-  profileContainer.addEventListener('mouseleave', () => {
+  container.addEventListener('mouseleave', () => {
     hoverInfo.style.display = 'none';
     posMarker.setStyle({ opacity: 0, fillOpacity: 0 });
   });
 
-  profileContainer.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const { padL, plotW, maxDist } = profileParams;
-    const dist = ((mx - padL) / plotW) * maxDist;
+  // --- Drag-to-select (with click fallback for pan) ---
+  let dragState = null;
 
-    let closest = 0, minD = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const d = Math.abs(points[i].dist - dist);
-      if (d < minD) { minD = d; closest = i; }
-    }
-    map.panTo([points[closest].lat, points[closest].lon]);
+  function positionOverlayFromPixels(xStart, xEnd) {
+    const rect = canvas.getBoundingClientRect();
+    const contRect = container.getBoundingClientRect();
+    const left = Math.min(xStart, xEnd);
+    const width = Math.abs(xEnd - xStart);
+    selectionOverlay.style.left = (rect.left - contRect.left + left) + 'px';
+    selectionOverlay.style.top = (rect.top - contRect.top) + 'px';
+    selectionOverlay.style.width = width + 'px';
+    selectionOverlay.style.height = rect.height + 'px';
+    selectionOverlay.style.display = 'block';
+  }
+
+  function inPlotArea(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const { padL, padR, padT, padB } = profileParams;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    return x >= padL && x <= rect.width - padR && y >= padT && y <= rect.height - padB;
+  }
+
+  container.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (!inPlotArea(e.clientX, e.clientY)) return;
+    const rect = canvas.getBoundingClientRect();
+    dragState = {
+      startClientX: e.clientX,
+      startCanvasX: e.clientX - rect.left,
+      moved: false,
+    };
+    e.preventDefault();
   });
 
-  return profileApi;
+  window.addEventListener('mousemove', (e) => {
+    if (!dragState) return;
+    const rect = canvas.getBoundingClientRect();
+    const curCanvasX = Math.max(
+      profileParams.padL,
+      Math.min(rect.width - profileParams.padR, e.clientX - rect.left)
+    );
+    const dx = Math.abs(e.clientX - dragState.startClientX);
+    if (dx >= DRAG_THRESHOLD_PX) {
+      dragState.moved = true;
+      hoverInfo.style.display = 'none';
+      const startCanvasXClamped = Math.max(
+        profileParams.padL,
+        Math.min(rect.width - profileParams.padR, dragState.startCanvasX)
+      );
+      positionOverlayFromPixels(startCanvasXClamped, curCanvasX);
+      dragState.endCanvasX = curCanvasX;
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!dragState) return;
+    const wasDrag = dragState.moved;
+    const startCanvasX = dragState.startCanvasX;
+    const endCanvasX = dragState.endCanvasX != null
+      ? dragState.endCanvasX
+      : startCanvasX;
+    dragState = null;
+    selectionOverlay.style.display = 'none';
+
+    if (wasDrag) {
+      const rect = canvas.getBoundingClientRect();
+      const { padL, plotW, distMin, distSpan } = profileParams;
+      const x1 = Math.max(padL, Math.min(rect.width - profileParams.padR, Math.min(startCanvasX, endCanvasX)));
+      const x2 = Math.max(padL, Math.min(rect.width - profileParams.padR, Math.max(startCanvasX, endCanvasX)));
+      const d1 = distMin + ((x1 - padL) / plotW) * distSpan;
+      const d2 = distMin + ((x2 - padL) / plotW) * distSpan;
+      setViewRange({ distMin: d1, distMax: d2 });
+    } else {
+      // Treat as click — pan map to nearest point (existing behavior).
+      const dist = distAtClientX(e.clientX);
+      let closest = 0, minD = Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const d = Math.abs(points[i].dist - dist);
+        if (d < minD) { minD = d; closest = i; }
+      }
+      map.panTo([points[closest].lat, points[closest].lon]);
+    }
+  });
+
+  // Cancel drag on Escape.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (dragState) {
+        dragState = null;
+        selectionOverlay.style.display = 'none';
+      } else if (viewRange.distMin > 0 || viewRange.distMax < totalDist) {
+        clearViewRange();
+      }
+    }
+  });
+
+  return {
+    drawProfile: () => { profileParams = drawProfile(); },
+    setViewRange,
+    clearViewRange,
+    isZoomed: () => viewRange.distMin > 0 || viewRange.distMax < totalDist,
+  };
 }
