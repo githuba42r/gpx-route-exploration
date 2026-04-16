@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPX Gradient Analysis</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; }
+  #header { padding: 16px 24px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  #header h1 { font-size: 1.4em; color: #e94560; margin-bottom: 4px; }
+  #header .subtitle { font-size: 0.9em; color: #a0a0b0; }
+  #main { display: flex; flex-direction: column; height: calc(100vh - 70px); }
+  #map { flex: 1; min-height: 400px; }
+  #profile-container { height: 220px; background: #16213e; border-top: 2px solid #0f3460; position: relative; }
+  #profile-canvas { width: 100%; height: 100%; }
+  #stats { display: flex; gap: 16px; padding: 12px 24px; background: #0f3460; flex-wrap: wrap; }
+  .stat { text-align: center; min-width: 120px; }
+  .stat .value { font-size: 1.3em; font-weight: 700; color: #e94560; }
+  .stat .label { font-size: 0.75em; color: #a0a0b0; text-transform: uppercase; letter-spacing: 0.5px; }
+  #legend { display: flex; gap: 8px; padding: 8px 24px; background: #16213e; border-top: 1px solid #0f3460; flex-wrap: wrap; align-items: center; }
+  #legend .title { font-size: 0.8em; color: #a0a0b0; margin-right: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.75em; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: opacity 0.2s; user-select: none; }
+  .legend-item:hover { background: rgba(255,255,255,0.08); }
+  .legend-item.disabled { opacity: 0.35; text-decoration: line-through; }
+  .legend-swatch { width: 24px; height: 8px; border-radius: 2px; }
+  .legend-btn { font-size: 0.7em; padding: 3px 10px; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #a0a0b0; cursor: pointer; margin-left: 4px; transition: background 0.2s; }
+  .legend-btn:hover { background: #0f3460; color: #e0e0e0; }
+  .legend-btn.active { background: #e94560; color: #fff; border-color: #e94560; }
+  #hover-info { position: absolute; top: 8px; right: 8px; background: rgba(22,33,62,0.95); padding: 10px 14px; border-radius: 6px; font-size: 0.8em; border: 1px solid #0f3460; z-index: 1000; pointer-events: none; display: none; }
+  #hover-info .hi-val { font-weight: 700; color: #e94560; }
+  #file-input-area { display: none; padding: 40px; text-align: center; }
+  .leaflet-popup-content { color: #333; }
+  #map-hover-panel { position: absolute; top: 10px; right: 10px; z-index: 1000; font-size: 0.8em; }
+  #map-hover-toggle { background: rgba(22,33,62,0.9); border: 1px solid #0f3460; color: #a0a0b0; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.85em; display: block; margin-left: auto; }
+  #map-hover-toggle:hover { background: #0f3460; color: #e0e0e0; }
+  #map-hover-body { background: rgba(22,33,62,0.95); border: 1px solid #0f3460; border-radius: 6px; padding: 10px 14px; margin-top: 4px; min-width: 200px; }
+  #map-hover-body .mh-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+  #map-hover-body .mh-label { color: #a0a0b0; }
+  #map-hover-body .mh-val { font-weight: 700; color: #e94560; text-align: right; }
+  #map-hover-body .mh-section { border-top: 1px solid #0f3460; margin-top: 6px; padding-top: 6px; }
+  #map-hover-body .mh-title { color: #a0a0b0; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1 id="track-name">GPX Gradient Analysis</h1>
+  <div class="subtitle" id="track-subtitle">Loading...</div>
+</div>
+
+<div id="stats"></div>
+
+<div id="main">
+  <div id="map" style="position:relative;">
+    <div id="map-hover-panel">
+      <button id="map-hover-toggle">Route Info</button>
+      <div id="map-hover-body" style="display:none;">
+        <div class="mh-title">Point</div>
+        <div class="mh-row"><span class="mh-label">Distance</span><span class="mh-val" id="mh-dist">—</span></div>
+        <div class="mh-row"><span class="mh-label">Elevation</span><span class="mh-val" id="mh-ele">—</span></div>
+        <div class="mh-row"><span class="mh-label">Gradient</span><span class="mh-val" id="mh-grad">—</span></div>
+        <div class="mh-section">
+          <div class="mh-title">Gradient Section</div>
+          <div class="mh-row"><span class="mh-label">Length</span><span class="mh-val" id="mh-sec-len">—</span></div>
+          <div class="mh-row"><span class="mh-label">Rise / Fall</span><span class="mh-val" id="mh-sec-rise">—</span></div>
+          <div class="mh-row"><span class="mh-label">Avg Gradient</span><span class="mh-val" id="mh-sec-avg">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="legend"></div>
+  <div id="profile-container">
+    <canvas id="profile-canvas"></canvas>
+    <div id="hover-info">
+      <div>Distance: <span class="hi-val" id="hi-dist"></span></div>
+      <div>Elevation: <span class="hi-val" id="hi-ele"></span></div>
+      <div>Gradient: <span class="hi-val" id="hi-grad"></span></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// --- Gradient color schemes ---
+const DIRECTIONAL_RANGES = [
+  { min: -Infinity, max: -10, color: '#1a237e', label: '< -10%' },
+  { min: -10, max: -5,       color: '#1565c0', label: '-10 to -5%' },
+  { min: -5,  max: -2,       color: '#42a5f5', label: '-5 to -2%' },
+  { min: -2,  max: 2,        color: '#66bb6a', label: '-2 to 2% (flat)' },
+  { min: 2,   max: 5,        color: '#ffee58', label: '2 to 5%' },
+  { min: 5,   max: 8,        color: '#ffa726', label: '5 to 8%' },
+  { min: 8,   max: 12,       color: '#ef5350', label: '8 to 12%' },
+  { min: 12,  max: 16,       color: '#c62828', label: '12 to 16%' },
+  { min: 16,  max: Infinity, color: '#4a148c', label: '> 16%' },
+];
+
+// Absolute ranges — applied to Math.abs(gradient)
+const ABSOLUTE_RANGES = [
+  { min: 0,  max: 2,        color: '#66bb6a', label: '0 to 2% (flat)' },
+  { min: 2,  max: 5,        color: '#ffee58', label: '2 to 5%' },
+  { min: 5,  max: 8,        color: '#ffa726', label: '5 to 8%' },
+  { min: 8,  max: 12,       color: '#ef5350', label: '8 to 12%' },
+  { min: 12, max: 16,       color: '#c62828', label: '12 to 16%' },
+  { min: 16, max: Infinity, color: '#4a148c', label: '> 16%' },
+];
+
+let useAbsoluteMode = true;
+
+// Convert gradient % to angle in degrees: angle = atan(gradient/100)
+function gradToAngle(g) {
+  return Math.atan(g / 100) * (180 / Math.PI);
+}
+function angleLabel(minPct, maxPct) {
+  const a1 = gradToAngle(Math.abs(minPct)).toFixed(1);
+  const a2 = gradToAngle(Math.abs(maxPct)).toFixed(1);
+  if (!isFinite(minPct) || !isFinite(maxPct)) {
+    return isFinite(minPct) ? `> ${a1}\u00b0` : `< ${a2}\u00b0`;
+  }
+  return `${a1}\u2013${a2}\u00b0`;
+}
+
+function activeRanges() {
+  return useAbsoluteMode ? ABSOLUTE_RANGES : DIRECTIONAL_RANGES;
+}
+
+function effectiveGradient(g) {
+  return useAbsoluteMode ? Math.abs(g) : g;
+}
+
+function gradientColor(g) {
+  const eg = effectiveGradient(g);
+  for (const r of activeRanges()) {
+    if (eg >= r.min && eg < r.max) return r.color;
+  }
+  return '#888';
+}
+
+// --- Haversine distance in meters ---
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// --- Smoothing (moving average on elevation) ---
+function smoothElevations(eles, window) {
+  const half = Math.floor(window / 2);
+  return eles.map((_, i) => {
+    let sum = 0, count = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(eles.length - 1, i + half); j++) {
+      sum += eles[j]; count++;
+    }
+    return sum / count;
+  });
+}
+
+// --- Parse GPX ---
+async function loadGPX() {
+  const resp = await fetch('2026-04-16 Bicycle 58.52 km.gpx');
+  const text = await resp.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/xml');
+
+  const trkpts = doc.querySelectorAll('trkpt');
+  const points = [];
+  trkpts.forEach(pt => {
+    const lat = parseFloat(pt.getAttribute('lat'));
+    const lon = parseFloat(pt.getAttribute('lon'));
+    const eleEl = pt.querySelector('ele');
+    const ele = eleEl ? parseFloat(eleEl.textContent) : null;
+    if (ele !== null) points.push({ lat, lon, ele });
+  });
+
+  const nameEl = doc.querySelector('metadata name');
+  const trackName = nameEl ? nameEl.textContent : 'GPX Track';
+
+  return { points, trackName };
+}
+
+// --- Main ---
+async function main() {
+  const { points, trackName } = await loadGPX();
+
+  document.getElementById('track-name').textContent = trackName;
+
+  // Smooth elevations
+  const rawEles = points.map(p => p.ele);
+  const smoothed = smoothElevations(rawEles, 7);
+  points.forEach((p, i) => p.eleSmooth = smoothed[i]);
+
+  // Calculate cumulative distance
+  let cumDist = 0;
+  points[0].dist = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = haversine(points[i-1].lat, points[i-1].lon, points[i].lat, points[i].lon);
+    cumDist += d;
+    points[i].dist = cumDist;
+  }
+
+  // Calculate gradient over a minimum distance window (~100m)
+  // This avoids extreme values from GPS jitter over short point-to-point spans
+  const MIN_GRADIENT_DIST = 100; // metres
+  points[0].gradient = 0;
+  for (let i = 1; i < points.length; i++) {
+    // Walk backwards from i to find a point at least MIN_GRADIENT_DIST behind
+    let j = i - 1;
+    while (j > 0 && (points[i].dist - points[j].dist) < MIN_GRADIENT_DIST) j--;
+    const dDist = points[i].dist - points[j].dist;
+    points[i].gradient = dDist > 1 ? ((points[i].eleSmooth - points[j].eleSmooth) / dDist) * 100 : 0;
+  }
+
+  // Stats
+  const totalDist = cumDist;
+  const minEle = Math.min(...rawEles);
+  const maxEle = Math.max(...rawEles);
+  let totalGain = 0, totalLoss = 0;
+  for (let i = 1; i < points.length; i++) {
+    const diff = smoothed[i] - smoothed[i-1];
+    if (diff > 0) totalGain += diff; else totalLoss += Math.abs(diff);
+  }
+
+  const maxGrad = Math.max(...points.map(p => p.gradient));
+  const minGrad = Math.min(...points.map(p => p.gradient));
+
+  // Render stats
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="value">${(totalDist/1000).toFixed(1)} km</div><div class="label">Distance</div></div>
+    <div class="stat"><div class="value">${minEle.toFixed(0)}m</div><div class="label">Min Elevation</div></div>
+    <div class="stat"><div class="value">${maxEle.toFixed(0)}m</div><div class="label">Max Elevation</div></div>
+    <div class="stat"><div class="value">${totalGain.toFixed(0)}m</div><div class="label">Total Climb</div></div>
+    <div class="stat"><div class="value">${totalLoss.toFixed(0)}m</div><div class="label">Total Descent</div></div>
+    <div class="stat"><div class="value">${maxGrad.toFixed(1)}%</div><div class="label">Max Gradient</div></div>
+    <div class="stat"><div class="value">${minGrad.toFixed(1)}%</div><div class="label">Steepest Descent</div></div>
+  `;
+  document.getElementById('track-subtitle').textContent =
+    `${points.length} trackpoints | Elevation ${minEle.toFixed(0)}m — ${maxEle.toFixed(0)}m | Smoothed (7-pt) | Gradient over 100m window`;
+
+  // --- Gradient distribution (recomputed on mode switch) ---
+  function computeGradDist() {
+    const gd = {};
+    activeRanges().forEach(r => gd[r.label] = 0);
+    for (let i = 1; i < points.length; i++) {
+      const segLen = points[i].dist - points[i-1].dist;
+      const eg = effectiveGradient(points[i].gradient);
+      for (const r of activeRanges()) {
+        if (eg >= r.min && eg < r.max) { gd[r.label] += segLen; break; }
+      }
+    }
+    return gd;
+  }
+
+  // --- Visibility state per gradient range ---
+  let rangeVisible = {};
+  function resetVisibility() {
+    rangeVisible = {};
+    activeRanges().forEach(r => {
+      // In absolute mode, hide ranges below 10% by default
+      rangeVisible[r.label] = useAbsoluteMode ? r.min >= 10 : true;
+    });
+  }
+  resetVisibility();
+
+  function rangeForGradient(g) {
+    const eg = effectiveGradient(g);
+    for (const r of activeRanges()) {
+      if (eg >= r.min && eg < r.max) return r.label;
+    }
+    return null;
+  }
+
+  // Legend (clickable)
+  function renderLegend() {
+    const legendEl = document.getElementById('legend');
+    legendEl.innerHTML = '';
+
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.textContent = 'Gradient:';
+    legendEl.appendChild(title);
+
+    // Abs/Directional toggle
+    const modeBtn = document.createElement('button');
+    modeBtn.className = 'legend-btn' + (useAbsoluteMode ? ' active' : '');
+    modeBtn.textContent = useAbsoluteMode ? 'Absolute' : 'Directional';
+    modeBtn.title = 'Toggle between directional (+/-) and absolute gradient ranges';
+    modeBtn.addEventListener('click', () => {
+      useAbsoluteMode = !useAbsoluteMode;
+      resetVisibility();
+      rebuildSegmentColors();
+      applyVisibility();
+      renderLegend();
+    });
+    legendEl.appendChild(modeBtn);
+
+    const gradDist = computeGradDist();
+    activeRanges().forEach(r => {
+      const pct = ((gradDist[r.label] || 0) / totalDist * 100).toFixed(1);
+      const item = document.createElement('span');
+      item.className = 'legend-item' + (rangeVisible[r.label] ? '' : ' disabled');
+      const ang = angleLabel(r.min, r.max);
+      item.innerHTML = `<span class="legend-swatch" style="background:${r.color}"></span>${r.label} / ${ang} (${pct}%)`;
+      item.addEventListener('click', () => {
+        rangeVisible[r.label] = !rangeVisible[r.label];
+        applyVisibility();
+        renderLegend();
+      });
+      legendEl.appendChild(item);
+    });
+
+    // Show All / Hide All buttons
+    const showBtn = document.createElement('button');
+    showBtn.className = 'legend-btn';
+    showBtn.textContent = 'Show All';
+    showBtn.addEventListener('click', () => {
+      activeRanges().forEach(r => rangeVisible[r.label] = true);
+      applyVisibility();
+      renderLegend();
+    });
+
+    const hideBtn = document.createElement('button');
+    hideBtn.className = 'legend-btn';
+    hideBtn.textContent = 'Hide All';
+    hideBtn.addEventListener('click', () => {
+      activeRanges().forEach(r => rangeVisible[r.label] = false);
+      applyVisibility();
+      renderLegend();
+    });
+
+    legendEl.appendChild(showBtn);
+    legendEl.appendChild(hideBtn);
+  }
+
+  // --- Map ---
+  const map = L.map('map', { zoomControl: true }).setView([points[0].lat, points[0].lon], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  // Base route line (thin, always visible, neutral colour)
+  const baseRoute = L.polyline(
+    points.map(p => [p.lat, p.lon]),
+    { color: '#555555', weight: 2, opacity: 0.6 }
+  ).addTo(map);
+
+  // Draw colored gradient overlay segments
+  const segmentLayers = [];
+  for (let i = 1; i < points.length; i++) {
+    const color = gradientColor(points[i].gradient);
+    const line = L.polyline(
+      [[points[i-1].lat, points[i-1].lon], [points[i].lat, points[i].lon]],
+      { color, weight: 4, opacity: 0.9 }
+    ).addTo(map);
+    line._pointIndex = i;
+    line._gradientRange = rangeForGradient(points[i].gradient);
+    segmentLayers.push(line);
+  }
+
+  // Precompute contiguous gradient sections (runs of same range label)
+  // Returns array of { startIdx, endIdx, label } for each point index
+  function computeGradientSections() {
+    const sections = new Array(points.length);
+    sections[0] = { startIdx: 0, endIdx: 0, label: rangeForGradient(0) };
+    // Build runs
+    const runs = [];
+    let runStart = 1;
+    let runLabel = rangeForGradient(points[1].gradient);
+    for (let i = 2; i <= points.length; i++) {
+      const lbl = i < points.length ? rangeForGradient(points[i].gradient) : null;
+      if (lbl !== runLabel || i === points.length) {
+        runs.push({ startIdx: runStart, endIdx: i - 1, label: runLabel });
+        runStart = i;
+        runLabel = lbl;
+      }
+    }
+    // Map each point to its run
+    for (const run of runs) {
+      for (let i = run.startIdx; i <= run.endIdx; i++) {
+        sections[i] = run;
+      }
+    }
+    return sections;
+  }
+  let gradSections = computeGradientSections();
+
+  // Recolor all segments when switching abs/directional mode
+  function rebuildSegmentColors() {
+    segmentLayers.forEach(line => {
+      const g = points[line._pointIndex].gradient;
+      line.setStyle({ color: gradientColor(g) });
+      line._gradientRange = rangeForGradient(g);
+    });
+    gradSections = computeGradientSections();
+  }
+
+  function applyVisibility() {
+    segmentLayers.forEach(line => {
+      const visible = rangeVisible[line._gradientRange];
+      if (visible && !map.hasLayer(line)) map.addLayer(line);
+      if (!visible && map.hasLayer(line)) map.removeLayer(line);
+    });
+    // Redraw profile to reflect visibility
+    profileParams = drawProfile();
+  }
+
+  renderLegend();
+
+  // --- Map hover info panel ---
+  const mhPanel = document.getElementById('map-hover-body');
+  const mhToggle = document.getElementById('map-hover-toggle');
+  let mhVisible = false;
+  mhToggle.addEventListener('click', () => {
+    mhVisible = !mhVisible;
+    mhPanel.style.display = mhVisible ? 'block' : 'none';
+    mhToggle.textContent = mhVisible ? 'Hide Info' : 'Route Info';
+  });
+
+  // Prevent map drag/zoom when interacting with the panel
+  const panelEl = document.getElementById('map-hover-panel');
+  L.DomEvent.disableClickPropagation(panelEl);
+  L.DomEvent.disableScrollPropagation(panelEl);
+
+  function updateMapHover(ptIdx) {
+    if (!mhVisible) return;
+    const p = points[ptIdx];
+    const displayGrad = useAbsoluteMode ? Math.abs(p.gradient) : p.gradient;
+    const gradSign = (!useAbsoluteMode && p.gradient > 0) ? '+' : '';
+
+    document.getElementById('mh-dist').textContent = (p.dist / 1000).toFixed(2) + ' km';
+    document.getElementById('mh-ele').textContent = p.eleSmooth.toFixed(1) + ' m';
+    const ptAngle = gradToAngle(displayGrad).toFixed(1);
+    document.getElementById('mh-grad').textContent = gradSign + displayGrad.toFixed(1) + '% / ' + ptAngle + '\u00b0';
+
+    // Section stats — a run from startIdx to endIdx represents segments
+    // connecting points[startIdx-1]..points[endIdx]
+    const sec = gradSections[ptIdx];
+    if (sec) {
+      const secStart = Math.max(0, sec.startIdx - 1);
+      const secDist = points[sec.endIdx].dist - points[secStart].dist;
+      const secRise = points[sec.endIdx].eleSmooth - points[secStart].eleSmooth;
+      // Average of point gradients (matches coloring), not naive rise/distance
+      let gradSum = 0, gradCount = 0;
+      for (let si = sec.startIdx; si <= sec.endIdx; si++) {
+        gradSum += points[si].gradient;
+        gradCount++;
+      }
+      const secAvg = gradCount > 0 ? gradSum / gradCount : 0;
+      const absAvg = useAbsoluteMode ? Math.abs(secAvg) : secAvg;
+      const avgSign = (!useAbsoluteMode && secAvg > 0) ? '+' : '';
+
+      document.getElementById('mh-sec-len').textContent = secDist >= 1000
+        ? (secDist / 1000).toFixed(2) + ' km'
+        : secDist.toFixed(0) + ' m';
+      document.getElementById('mh-sec-rise').textContent =
+        (secRise >= 0 ? '+' : '') + secRise.toFixed(1) + ' m';
+      const secAngle = gradToAngle(absAvg).toFixed(1);
+      document.getElementById('mh-sec-avg').textContent = avgSign + absAvg.toFixed(1) + '% / ' + secAngle + '\u00b0';
+    }
+  }
+
+  function clearMapHover() {
+    if (!mhVisible) return;
+    ['mh-dist','mh-ele','mh-grad','mh-sec-len','mh-sec-rise','mh-sec-avg'].forEach(id => {
+      document.getElementById(id).textContent = '—';
+    });
+  }
+
+  // Attach hover events to each segment
+  segmentLayers.forEach(line => {
+    line.on('mouseover', () => {
+      line.setStyle({ weight: 7 });
+      updateMapHover(line._pointIndex);
+    });
+    line.on('mouseout', () => {
+      line.setStyle({ weight: 4 });
+      clearMapHover();
+    });
+  });
+
+  // Also attach to the base route for when gradient layers are hidden
+  baseRoute.on('mouseover', (e) => {
+    // Find nearest point
+    const ll = e.latlng;
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = (points[i].lat - ll.lat)**2 + (points[i].lon - ll.lng)**2;
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    updateMapHover(bestIdx);
+  });
+  baseRoute.on('mouseout', () => clearMapHover());
+
+  // Start/End markers
+  L.circleMarker([points[0].lat, points[0].lon], {
+    radius: 8, color: '#00e676', fillColor: '#00e676', fillOpacity: 1
+  }).addTo(map).bindPopup('Start');
+  L.circleMarker([points[points.length-1].lat, points[points.length-1].lon], {
+    radius: 8, color: '#ff1744', fillColor: '#ff1744', fillOpacity: 1
+  }).addTo(map).bindPopup('End');
+
+  // Max gradient and steepest descent markers
+  let maxGradIdx = 1, minGradIdx = 1;
+  for (let i = 2; i < points.length; i++) {
+    if (points[i].gradient > points[maxGradIdx].gradient) maxGradIdx = i;
+    if (points[i].gradient < points[minGradIdx].gradient) minGradIdx = i;
+  }
+
+  const markerIcon = (html) => L.divIcon({
+    className: '',
+    html,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
+  });
+
+  const upArrow = markerIcon(
+    '<svg viewBox="0 0 28 28" width="28" height="28">' +
+    '<polygon points="14,2 26,22 2,22" fill="#e94560" stroke="#fff" stroke-width="2"/>' +
+    '</svg>'
+  );
+  const downArrow = markerIcon(
+    '<svg viewBox="0 0 28 28" width="28" height="28">' +
+    '<polygon points="14,26 26,6 2,6" fill="#1565c0" stroke="#fff" stroke-width="2"/>' +
+    '</svg>'
+  );
+
+  const mp = points[maxGradIdx];
+  L.marker([mp.lat, mp.lon], { icon: upArrow }).addTo(map).bindPopup(
+    `<b>Max Gradient: ${mp.gradient.toFixed(1)}%</b><br>` +
+    `Elevation: ${mp.eleSmooth.toFixed(1)}m<br>` +
+    `Distance: ${(mp.dist/1000).toFixed(2)} km`
+  );
+
+  const dp = points[minGradIdx];
+  L.marker([dp.lat, dp.lon], { icon: downArrow }).addTo(map).bindPopup(
+    `<b>Steepest Descent: ${dp.gradient.toFixed(1)}%</b><br>` +
+    `Elevation: ${dp.eleSmooth.toFixed(1)}m<br>` +
+    `Distance: ${(dp.dist/1000).toFixed(2)} km`
+  );
+
+  // Fit bounds
+  const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
+  map.fitBounds(bounds, { padding: [30, 30] });
+
+  // Position marker on map (synced with profile hover)
+  const posMarker = L.circleMarker([points[0].lat, points[0].lon], {
+    radius: 6, color: '#fff', fillColor: '#e94560', fillOpacity: 1, weight: 2, opacity: 0
+  }).addTo(map);
+
+  // --- Elevation Profile ---
+  const canvas = document.getElementById('profile-canvas');
+  const ctx = canvas.getContext('2d');
+  const hoverInfo = document.getElementById('hover-info');
+
+  function drawProfile() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const W = rect.width;
+    const H = rect.height;
+    const padL = 50, padR = 16, padT = 16, padB = 30;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const maxDist = points[points.length - 1].dist;
+    const eleMin = minEle - 10;
+    const eleMax = maxEle + 20;
+    const eleRange = eleMax - eleMin;
+
+    function xFor(dist) { return padL + (dist / maxDist) * plotW; }
+    function yFor(ele) { return padT + plotH - ((ele - eleMin) / eleRange) * plotH; }
+
+    // Background
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid lines
+    ctx.strokeStyle = '#1a2a4a';
+    ctx.lineWidth = 0.5;
+    const eleStep = eleRange > 300 ? 100 : eleRange > 150 ? 50 : 25;
+    for (let e = Math.ceil(eleMin / eleStep) * eleStep; e <= eleMax; e += eleStep) {
+      const y = yFor(e);
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+      ctx.fillStyle = '#6a7a9a';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${e}m`, padL - 4, y + 3);
+    }
+
+    const distStep = maxDist > 40000 ? 10000 : maxDist > 20000 ? 5000 : 2000;
+    for (let d = 0; d <= maxDist; d += distStep) {
+      const x = xFor(d);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+      ctx.fillStyle = '#6a7a9a';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${(d/1000).toFixed(0)} km`, x, H - padB + 14);
+    }
+
+    // Filled profile with gradient coloring (respects visibility toggle)
+    for (let i = 1; i < points.length; i++) {
+      const x1 = xFor(points[i-1].dist);
+      const x2 = xFor(points[i].dist);
+      const y1 = yFor(points[i-1].eleSmooth);
+      const y2 = yFor(points[i].eleSmooth);
+      const yBase = yFor(eleMin);
+      const rng = rangeForGradient(points[i].gradient);
+      const visible = rangeVisible[rng];
+
+      if (visible) {
+        ctx.fillStyle = gradientColor(points[i].gradient) + '60';
+        ctx.beginPath();
+        ctx.moveTo(x1, yBase);
+        ctx.lineTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x2, yBase);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = gradientColor(points[i].gradient);
+        ctx.lineWidth = 1.5;
+      } else {
+        ctx.strokeStyle = '#555555';
+        ctx.lineWidth = 1;
+      }
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    return { W, H, padL, padR, padT, padB, plotW, plotH, maxDist, eleMin, eleRange, xFor, yFor };
+  }
+
+  let profileParams = drawProfile();
+  window.addEventListener('resize', () => { profileParams = drawProfile(); });
+
+  // Apply initial visibility (must be after profile canvas is ready)
+  applyVisibility();
+
+  // Hover interaction
+  const profileContainer = document.getElementById('profile-container');
+  profileContainer.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const { padL, plotW, maxDist } = profileParams;
+
+    const dist = ((mx - padL) / plotW) * maxDist;
+    if (dist < 0 || dist > maxDist) { hoverInfo.style.display = 'none'; return; }
+
+    // Find closest point
+    let closest = 0;
+    let minD = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(points[i].dist - dist);
+      if (d < minD) { minD = d; closest = i; }
+    }
+
+    const p = points[closest];
+    document.getElementById('hi-dist').textContent = (p.dist / 1000).toFixed(2) + ' km';
+    document.getElementById('hi-ele').textContent = p.eleSmooth.toFixed(1) + 'm';
+    const displayGrad = useAbsoluteMode ? Math.abs(p.gradient) : p.gradient;
+    const gradPrefix = useAbsoluteMode ? '' : (p.gradient > 0 ? '+' : '');
+    const hiAngle = gradToAngle(Math.abs(displayGrad)).toFixed(1);
+    document.getElementById('hi-grad').textContent =
+      (useAbsoluteMode
+        ? displayGrad.toFixed(1) + '% / ' + hiAngle + '\u00b0'
+        : gradPrefix + displayGrad.toFixed(1) + '% / ' + hiAngle + '\u00b0');
+    hoverInfo.style.display = 'block';
+
+    // Move position marker on map and show it
+    posMarker.setLatLng([p.lat, p.lon]);
+    posMarker.setStyle({ opacity: 1, fillOpacity: 1 });
+  });
+
+  profileContainer.addEventListener('mouseleave', () => {
+    hoverInfo.style.display = 'none';
+    posMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+  });
+
+  // Click on profile to pan map
+  profileContainer.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const { padL, plotW, maxDist } = profileParams;
+    const dist = ((mx - padL) / plotW) * maxDist;
+
+    let closest = 0, minD = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(points[i].dist - dist);
+      if (d < minD) { minD = d; closest = i; }
+    }
+    map.panTo([points[closest].lat, points[closest].lon]);
+  });
+}
+
+main().catch(err => {
+  document.getElementById('track-subtitle').textContent = 'Error: ' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>
