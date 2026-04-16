@@ -1,0 +1,4 @@
+#stats { display: flex; gap: 16px; padding: 12px 24px; background: #0f3460; flex-wrap: wrap; }
+.stat { text-align: center; min-width: 120px; }
+.stat .value { font-size: 1.3em; font-weight: 700; color: #e94560; }
+.stat .label { font-size: 0.75em; color: #a0a0b0; text-transform: uppercase; letter-spacing: 0.5px; }

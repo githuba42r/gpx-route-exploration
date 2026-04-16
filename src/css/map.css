@@ -1,0 +1,25 @@
+#main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#map { flex: 1; min-height: 400px; }
+#map-hover-panel { position: absolute; top: 10px; right: 10px; z-index: 1000; font-size: 0.8em; }
+#map-hover-toggle { background: rgba(22,33,62,0.9); border: 1px solid #0f3460; color: #a0a0b0; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.85em; display: block; margin-left: auto; }
+#map-hover-toggle:hover { background: #0f3460; color: #e0e0e0; }
+#map-hover-body { background: rgba(22,33,62,0.95); border: 1px solid #0f3460; border-radius: 6px; padding: 10px 14px; margin-top: 4px; min-width: 200px; }
+#map-hover-body .mh-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+#map-hover-body .mh-label { color: #a0a0b0; }
+#map-hover-body .mh-val { font-weight: 700; color: #ff9f43; text-align: right; }
+#map-hover-body .mh-section { border-top: 1px solid #0f3460; margin-top: 6px; padding-top: 6px; }
+#map-hover-body .mh-title { color: #a0a0b0; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+
+/* Context menu */
+#ctx-menu { position: fixed; z-index: 2000; background: rgba(22,33,62,0.97); border: 1px solid #0f3460; border-radius: 6px; padding: 4px 0; min-width: 180px; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+#ctx-menu .ctx-item { padding: 7px 16px; cursor: pointer; font-size: 0.82em; color: #e0e0e0; display: flex; align-items: center; gap: 8px; }
+#ctx-menu .ctx-item:hover { background: #0f3460; }
+#ctx-menu .ctx-sep { height: 1px; background: #0f3460; margin: 4px 0; }
+
+/* Waypoint markers */
+.waypoint-icon { background: none; border: none; }
+.waypoint-icon svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+
+.modal-marker-tip { background: rgba(22,33,62,0.9) !important; color: #e0e0e0 !important; border: 1px solid #0f3460 !important; font-size: 0.75em !important; }
+.peak-tip { background: rgba(233,69,96,0.95) !important; color: #fff !important; border: 2px solid #fff !important; font-size: 0.85em !important; font-weight: 700 !important; padding: 4px 10px !important; }
+@keyframes peak-pulse { 0%,100% { transform: scale(1); opacity: 0.4; } 50% { transform: scale(2); opacity: 0; } }

@@ -1,0 +1,5 @@
+#main-nav { display: flex; align-items: center; gap: 16px; padding: 8px 24px; background: #16213e; border-bottom: 1px solid #0f3460; }
+#main-nav .nav-brand { color: #e94560; text-decoration: none; font-weight: 700; font-size: 1.1em; }
+#main-nav .nav-route-title { color: #e0e0e0; font-size: 0.95em; }
+#main-nav a { color: #a0a0b0; text-decoration: none; font-size: 0.85em; }
+#main-nav a:hover { color: #e0e0e0; }

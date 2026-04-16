@@ -1,0 +1,10 @@
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; background: #0f3460; border-radius: 12px; font-size: 0.75em; color: #e0e0e0; cursor: pointer; }
+.tag-chip:hover { background: #e94560; }
+.tag-chip .tag-remove { cursor: pointer; opacity: 0.6; }
+.tag-chip .tag-remove:hover { opacity: 1; }
+.tag-input { background: #1a1a2e; border: 1px solid #0f3460; border-radius: 4px; padding: 4px 8px; color: #e0e0e0; font-size: 0.85em; }
+.tag-input:focus { outline: none; border-color: #e94560; }
+.tag-suggestions { position: absolute; background: #16213e; border: 1px solid #0f3460; border-radius: 4px; max-height: 150px; overflow-y: auto; z-index: 100; }
+.tag-suggestions .suggestion { padding: 4px 10px; cursor: pointer; font-size: 0.8em; }
+.tag-suggestions .suggestion:hover { background: #0f3460; }

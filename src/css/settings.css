@@ -1,0 +1,7 @@
+#settings-bar { display: flex; gap: 16px; padding: 8px 24px; background: #1a1a2e; border-bottom: 1px solid #0f3460; align-items: center; flex-wrap: wrap; }
+#settings-bar .settings-title { font-size: 0.8em; color: #a0a0b0; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+.setting-group { display: flex; align-items: center; gap: 6px; font-size: 0.8em; }
+.setting-group label { color: #a0a0b0; white-space: nowrap; }
+.setting-group input[type="range"] { width: 120px; accent-color: #e94560; cursor: pointer; }
+.setting-group .setting-val { color: #e94560; font-weight: 700; min-width: 40px; text-align: center; }
+.setting-group select { background: #16213e; color: #e0e0e0; border: 1px solid #0f3460; border-radius: 4px; padding: 2px 6px; font-size: 1em; cursor: pointer; }
