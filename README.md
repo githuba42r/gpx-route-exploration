@@ -44,12 +44,39 @@ Set these in a `.env` file alongside `docker-compose.yml` — Docker Compose pic
 
 ## Prerequisites
 
-The application depends on two external services:
+The application depends on two external OpenStreetMap-based services:
 
-- **Valhalla** — routing engine with DEM/height data, required for the terrain gradient feature and elevation queries. Standard Docker image: [ghcr.io/valhalla/valhalla](https://github.com/valhalla/valhalla/pkgs/container/valhalla)
-- **Nominatim** — OpenStreetMap geocoding service. Standard Docker image: [mediagis/nominatim](https://hub.docker.com/r/mediagis/nominatim)
+| Service | Purpose | Required For |
+|---------|---------|-------------|
+| **Valhalla** | Routing engine + DEM elevation | Terrain gradient feature (`/proxy/valhalla/height`) |
+| **Nominatim** | Geocoding (place names) | Location search |
 
-Both services can run in Docker. The application proxies all client requests to them — clients never connect to Valhalla or Nominatim directly.
+### Local Setup (Recommended)
+
+Run both services locally with Docker for best performance and no rate limits. A regional OSM extract (e.g. SE Queensland) can be set up in minutes with ~700 MB of disk space.
+
+See **[docs/local-osm-services.md](docs/local-osm-services.md)** for the full guide including:
+- Docker Compose setup for both services
+- Creating smaller regional extracts with `osmium` for faster setup
+- Bounding box examples for Australian regions
+- DEM/elevation data configuration
+- Disk space estimates
+
+### Public Services
+
+You can also point at public instances (with rate limits):
+
+```bash
+# Public Nominatim (max 1 req/sec, no bulk queries)
+NOMINATIM_URL=https://nominatim.openstreetmap.org
+
+# No public Valhalla with DEM — local instance required for terrain gradient
+VALHALLA_URL=http://your-valhalla-host:8002
+```
+
+**Note:** The terrain gradient feature requires Valhalla's `/height` endpoint with DEM data, which public/hosted Valhalla services typically don't provide. A local instance with `build_elevation=True` is needed for this feature.
+
+The application proxies all client requests to these services — clients never connect to Valhalla or Nominatim directly.
 
 ## Authentication
 
