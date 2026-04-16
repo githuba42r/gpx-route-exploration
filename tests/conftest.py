@@ -19,3 +19,17 @@ def app(tmp_path):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def sample_gpx():
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "sample.gpx")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+@pytest.fixture
+def sample_gpx_no_name():
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "sample_no_name.gpx")
+    with open(path, "rb") as f:
+        return f.read()
