@@ -1,0 +1,127 @@
+{% extends "_base.html" %}
+{% block title %}{{ route.title }} — GPX Analysis{% endblock %}
+{% block css %}
+<link rel="stylesheet" href="/static/dist/analysis.min.css">
+{% endblock %}
+{% block body_attrs %}data-gpx-file="/api/gpx/{{ route.id }}" data-route-id="{{ route.id }}"{% endblock %}
+{% block nav_items %}
+<a href="/">&larr; Library</a>
+<span class="nav-route-title">{{ route.title }}</span>
+{% endblock %}
+{% block content %}
+<div id="header">
+  <h1 id="track-name">GPX Gradient Analysis</h1>
+  <div class="subtitle" id="track-subtitle">Loading...</div>
+</div>
+
+<div id="stats"></div>
+
+<div id="settings-bar">
+  <span class="settings-title">Analysis:</span>
+  <div class="setting-group">
+    <label for="set-smooth">Smoothing</label>
+    <input type="range" id="set-smooth" min="1" max="25" step="2" value="7">
+    <span class="setting-val" id="set-smooth-val">7 pt</span>
+  </div>
+  <div class="setting-group">
+    <label for="set-graddist">Gradient Window</label>
+    <input type="range" id="set-graddist" min="0" max="200" step="10" value="100">
+    <span class="setting-val" id="set-graddist-val">100m</span>
+  </div>
+  <div class="setting-group">
+    <label>Presets</label>
+    <select id="set-preset">
+      <option value="">Custom</option>
+      <option value="raw">Raw (no smoothing)</option>
+      <option value="detail">Detail (short features)</option>
+      <option value="default">Default (general)</option>
+      <option value="smooth">Smooth (long climbs)</option>
+    </select>
+  </div>
+</div>
+
+<div id="main">
+  <div id="map" style="position:relative;">
+    <div id="map-hover-panel">
+      <button id="map-hover-toggle">Route Info</button>
+      <div id="map-hover-body" style="display:none;">
+        <div class="mh-title">Point</div>
+        <div class="mh-row"><span class="mh-label">Distance</span><span class="mh-val" id="mh-dist">&mdash;</span></div>
+        <div class="mh-row"><span class="mh-label">Elevation</span><span class="mh-val" id="mh-ele">&mdash;</span></div>
+        <div class="mh-row"><span class="mh-label">Gradient</span><span class="mh-val" id="mh-grad">&mdash;</span></div>
+        <div class="mh-section">
+          <div class="mh-title">Gradient Section</div>
+          <div class="mh-row"><span class="mh-label">Length</span><span class="mh-val" id="mh-sec-len">&mdash;</span></div>
+          <div class="mh-row"><span class="mh-label">Rise / Fall</span><span class="mh-val" id="mh-sec-rise">&mdash;</span></div>
+          <div class="mh-row"><span class="mh-label">Avg Gradient</span><span class="mh-val" id="mh-sec-avg">&mdash;</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="legend"></div>
+  <div id="profile-container">
+    <canvas id="profile-canvas"></canvas>
+    <div id="hover-info">
+      <div>Distance: <span class="hi-val" id="hi-dist"></span></div>
+      <div>Elevation: <span class="hi-val" id="hi-ele"></span></div>
+      <div>Gradient: <span class="hi-val" id="hi-grad"></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-add-waypoint">&#128204; Add Waypoint</div>
+  <div class="ctx-item" id="ctx-grad-info">&#128200; Route Gradient</div>
+  <div class="ctx-item" id="ctx-terrain-info">&#9968; Terrain Gradient</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-remove-waypoint" style="display:none;">&#10060; Remove Waypoint</div>
+</div>
+
+<!-- Gradient info modal -->
+<div id="grad-modal-overlay">
+  <div id="grad-modal">
+    <h3>Location Gradient Info</h3>
+    <div class="gm-row"><span class="gm-label">Position</span><span class="gm-val" id="gm-pos"></span></div>
+    <div class="gm-row"><span class="gm-label">Nearest Track Point</span><span class="gm-val" id="gm-dist"></span></div>
+    <div class="gm-row"><span class="gm-label">Elevation</span><span class="gm-val" id="gm-ele"></span></div>
+    <div class="gm-row"><span class="gm-label">Gradient</span><span class="gm-val" id="gm-grad"></span></div>
+    <div class="gm-row"><span class="gm-label">Angle</span><span class="gm-val" id="gm-angle"></span></div>
+    <div class="gm-sep"></div>
+    <div class="gm-row"><span class="gm-label">Section Range</span><span class="gm-val" id="gm-sec-range"></span></div>
+    <div class="gm-row"><span class="gm-label">Section Length</span><span class="gm-val" id="gm-sec-len"></span></div>
+    <div class="gm-row"><span class="gm-label">Section Rise/Fall</span><span class="gm-val" id="gm-sec-rise"></span></div>
+    <div class="gm-row"><span class="gm-label">Section Avg Gradient</span><span class="gm-val" id="gm-sec-avg"></span></div>
+    <div class="gm-sep"></div>
+    <div style="font-size:0.85em; color:#a0a0b0; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Nearby Peak (<span id="gm-nearby-radius"></span>)</div>
+    <div class="gm-row"><span class="gm-label">Max Gradient</span><span class="gm-val" id="gm-nearby-max"></span></div>
+    <div class="gm-row"><span class="gm-label">At Distance</span><span class="gm-val" id="gm-nearby-dist"></span></div>
+    <div class="gm-row"><span class="gm-label">Elevation There</span><span class="gm-val" id="gm-nearby-ele"></span></div>
+    <button class="gm-close" id="gm-close">Close</button>
+  </div>
+</div>
+
+<!-- Terrain gradient modal -->
+<div id="terrain-modal-overlay">
+  <div id="grad-modal">
+    <h3>Terrain Gradient (DEM)</h3>
+    <div class="gm-row"><span class="gm-label">Position</span><span class="gm-val" id="tm-pos"></span></div>
+    <div class="gm-row"><span class="gm-label">Elevation</span><span class="gm-val" id="tm-ele"></span></div>
+    <div class="gm-sep"></div>
+    <div style="font-size:0.85em; color:#a0a0b0; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Steepest Direction</div>
+    <div class="gm-row"><span class="gm-label">Max Gradient</span><span class="gm-val" id="tm-max-grad"></span></div>
+    <div class="gm-row"><span class="gm-label">Direction</span><span class="gm-val" id="tm-direction"></span></div>
+    <div class="gm-sep"></div>
+    <div style="font-size:0.85em; color:#a0a0b0; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">All Directions (25m sample)</div>
+    <div id="tm-compass" style="font-size:0.8em; line-height:1.6;"></div>
+    <div class="gm-sep"></div>
+    <div id="tm-minimap" style="width:100%;height:220px;border-radius:6px;border:1px solid #0f3460;margin-top:8px;"></div>
+    <div style="font-size:0.7em; color:#666; margin-top:4px;">Source: Valhalla DEM (~30m resolution)</div>
+    <button class="gm-close" id="tm-close">Close</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/dist/analysis.min.js"></script>
+{% endblock %}

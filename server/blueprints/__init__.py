@@ -9,3 +9,6 @@ def register_blueprints(app):
     app.register_blueprint(categories_bp)
     app.register_blueprint(tags_bp)
     app.register_blueprint(proxy_bp)
+
+    from server.blueprints.pages import bp as pages_bp
+    app.register_blueprint(pages_bp)

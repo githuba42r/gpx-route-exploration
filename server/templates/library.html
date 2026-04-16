@@ -1,0 +1,22 @@
+{% extends "_base.html" %}
+{% block title %}Route Library{% endblock %}
+{% block css %}
+<link rel="stylesheet" href="/static/dist/library.min.css">
+{% endblock %}
+{% block content %}
+<div id="library-container">
+  <aside id="sidebar">
+    <div id="tag-cloud-container"></div>
+    <div id="category-panel"></div>
+  </aside>
+  <main id="route-list">
+    <div id="upload-area"></div>
+    <div id="routes-container"></div>
+  </main>
+</div>
+<div id="confirm-modal-overlay" class="modal-overlay"></div>
+<div id="metadata-modal-overlay" class="modal-overlay"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/dist/library.min.js"></script>
+{% endblock %}
