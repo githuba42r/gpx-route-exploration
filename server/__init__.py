@@ -25,4 +25,8 @@ def create_app(config_override=None):
     from server.blueprints import register_blueprints
     register_blueprints(app)
 
+    if not app.config.get("TESTING"):
+        from server.backup import start_backup_scheduler
+        start_backup_scheduler(app)
+
     return app
