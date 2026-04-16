@@ -16,12 +16,14 @@ Wrap the existing static GPX gradient analysis tool in a Flask web service that 
 ## Architecture
 
 ```
-Browser <-> Flask (gunicorn) <-> Valhalla (height/trace)
-                              <-> Nominatim (geocoding)
-                              <-> SQLite + filesystem (routes)
+Browser <-> Authelia/Nginx (auth) <-> Flask (gunicorn) <-> Valhalla (height/trace)
+                                                        <-> Nominatim (geocoding)
+                                                        <-> SQLite + filesystem (routes)
 ```
 
-Flask is the single network entry point. The browser never contacts Valhalla or Nominatim directly.
+Authentication is handled externally by Authelia or an Nginx reverse proxy in front of Flask. Flask reads the authenticated user identity from a configurable request header (e.g. `Remote-User`, `X-Forwarded-User`). If no header is present, the user defaults to `anonymous`. Each user's routes and categories are isolated — users only see their own data.
+
+Flask is the single network entry point for the application. The browser never contacts Valhalla or Nominatim directly.
 
 ### Environment Variables
 
@@ -32,6 +34,7 @@ Flask is the single network entry point. The browser never contacts Valhalla or 
 | `DATA_DIR` | `/app/data` | Volume mount for GPX files and SQLite DB |
 | `FLASK_PORT` | `5000` | Listen port |
 | `FLASK_SECRET_KEY` | `dev-secret-change-me` | Flask session secret |
+| `AUTH_USER_HEADER` | `Remote-User` | Request header containing the authenticated username (set by Authelia/Nginx) |
 
 ## Data Model
 
@@ -42,22 +45,24 @@ Flask is the single network entry point. The browser never contacts Valhalla or 
 | Column | Type | Constraints | Notes |
 |--------|------|-------------|-------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT | |
-| name | TEXT | NOT NULL UNIQUE | Display name |
-| slug | TEXT | NOT NULL UNIQUE | Filesystem folder name (auto-generated) |
+| user_id | TEXT | NOT NULL DEFAULT 'anonymous' | Owner identity from auth header |
+| name | TEXT | NOT NULL | Display name |
+| slug | TEXT | NOT NULL | Filesystem folder name (auto-generated) |
 | description | TEXT | | Optional |
 | created_at | DATETIME | NOT NULL DEFAULT CURRENT_TIMESTAMP | |
 
-Row id=1 ("Default", slug="default") is seeded on init and cannot be deleted or renamed.
+UNIQUE constraint on `(user_id, name)` and `(user_id, slug)`. A "Default" category is auto-created per user on their first request.
 
 **routes**
 
 | Column | Type | Constraints | Notes |
 |--------|------|-------------|-------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT | |
-| category_id | INTEGER | NOT NULL DEFAULT 1 REFERENCES categories(id) | |
+| user_id | TEXT | NOT NULL DEFAULT 'anonymous' | Owner identity from auth header |
+| category_id | INTEGER | NOT NULL REFERENCES categories(id) | Defaults to user's Default category |
 | filename | TEXT | NOT NULL | Original upload filename |
 | storage_name | TEXT | NOT NULL UNIQUE | UUID-based filename on disk |
-| title | TEXT | | Defaults to GPX metadata `<name>` |
+| title | TEXT | NOT NULL | Mandatory. Defaults to GPX metadata `<name>` on upload, operator must provide if GPX has none |
 | description | TEXT | | User-editable |
 | notes | TEXT | | User-editable |
 | created_at | DATETIME | NOT NULL DEFAULT CURRENT_TIMESTAMP | Upload time |
@@ -69,22 +74,62 @@ Row id=1 ("Default", slug="default") is seeded on init and cannot be deleted or 
 | max_gradient_desc | REAL | | Steepest descent % (100m window, 7pt smooth) |
 | point_count | INTEGER | | Number of trackpoints |
 
+**tags**
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | |
+| user_id | TEXT | NOT NULL DEFAULT 'anonymous' | Tags are per-user |
+| name | TEXT | NOT NULL | Tag display name (case-preserved) |
+| name_lower | TEXT | NOT NULL | Lowercase for dedup/matching |
+
+UNIQUE constraint on `(user_id, name_lower)`. Tags are created on first use and shared across routes and categories for the same user.
+
+**route_tags** (junction table)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| route_id | INTEGER | NOT NULL REFERENCES routes(id) ON DELETE CASCADE |
+| tag_id | INTEGER | NOT NULL REFERENCES tags(id) ON DELETE CASCADE |
+
+PRIMARY KEY on `(route_id, tag_id)`.
+
+**category_tags** (junction table)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| category_id | INTEGER | NOT NULL REFERENCES categories(id) ON DELETE CASCADE |
+| tag_id | INTEGER | NOT NULL REFERENCES tags(id) ON DELETE CASCADE |
+
+PRIMARY KEY on `(category_id, tag_id)`.
+
+Tags appear as a tag cloud on the library page, filterable. Routes and categories can each have multiple tags. The tag input field auto-completes from existing user tags.
+
 ### Filesystem Layout
 
 ```
 $DATA_DIR/
   routes.db
   gpx/
-    default/
-      <uuid>.gpx
-    <category-slug>/
-      <uuid>.gpx
+    anonymous/
+      default/
+        <uuid>.gpx
+      touring/
+        <uuid>.gpx
+    philg/
+      default/
+        <uuid>.gpx
+      commute/
+        <uuid>.gpx
 ```
 
+- Top-level folders are user identities (from auth header, slugified)
+- Within each user folder, category sub-folders hold the GPX files
 - Category folder names are slugified from the category name (lowercase, hyphens, no special chars)
 - Renaming a category renames the folder
 - Moving a route between categories moves the GPX file on disk
 - Deleting a category requires it to be empty (or moves routes to Default — operator's choice via API param)
+- All API queries are scoped to the current user — users cannot access other users' routes or categories
 
 ## API Endpoints
 
@@ -107,6 +152,15 @@ $DATA_DIR/
 | POST | `/api/categories` | JSON: `name`, `description` (optional) | JSON category object | Creates folder |
 | PATCH | `/api/categories/<id>` | JSON: `name`, `description` (optional) | JSON category object | Rename renames folder. Cannot rename id=1. |
 | DELETE | `/api/categories/<id>` | `?move_to_default=true` (optional) | 204 | Cannot delete id=1. Fails if non-empty unless `move_to_default=true`. |
+
+### Tags
+
+| Method | Path | Request | Response | Notes |
+|--------|------|---------|----------|-------|
+| GET | `/api/tags` | | JSON array of tags with usage counts | All tags for the current user |
+| PUT | `/api/routes/<id>/tags` | JSON: `tags` (array of tag names) | JSON route object | Set tags on a route (creates new tags as needed) |
+| PUT | `/api/categories/<id>/tags` | JSON: `tags` (array of tag names) | JSON category object | Set tags on a category |
+| DELETE | `/api/tags/<id>` | | 204 | Remove a tag entirely (unlinks from all routes/categories) |
 
 ### GPX File Proxy
 
@@ -140,11 +194,14 @@ $DATA_DIR/
 ### Library Page (`library.html` at `/`)
 
 - Route listing grouped by category, each category collapsible
-- Per-route card showing: title, distance, elevation range, max gradient, upload date, last accessed
+- Per-route card showing: title, distance, elevation range, max gradient, upload date, last accessed, tags
 - Click a route card to open its analysis page
-- Upload area (drag-and-drop or file picker) with optional category selector
-- Category management: create, rename, edit description
-- Route actions: edit metadata (inline or modal), move to category, delete with confirmation
+- Upload area (drag-and-drop or file picker) with optional category selector; title is mandatory (pre-filled from GPX `<name>` if available, operator must confirm or edit)
+- Category management: create, rename, edit description, manage tags
+- Route actions: edit metadata (inline or modal), move to category, manage tags, delete
+- **Tag cloud** in sidebar/header showing all user tags sized by usage count; clicking a tag filters the route list to routes/categories with that tag
+- **Tag input** on routes and categories: text field with auto-complete from existing user tags, add/remove tag chips
+- **Delete confirmations** use inline modals (styled to match the dark theme) — not browser `alert()` / `confirm()` dialogs. The modal shows what will be deleted and requires an explicit confirm/cancel action.
 - Responsive layout, same dark theme as the analysis page
 
 ## Service Proxy Implementation
@@ -239,6 +296,24 @@ Categories:
 - `test_delete_default_category_fails` — 400 for id=1
 - `test_update_category_description` — PATCH description
 
+User isolation:
+- `test_default_user_is_anonymous` — no auth header results in user_id='anonymous'
+- `test_user_from_header` — set `Remote-User` header, verify user_id used
+- `test_user_routes_isolated` — user A cannot see user B's routes
+- `test_user_categories_isolated` — user A cannot see user B's categories
+- `test_default_category_auto_created` — first request from a new user creates their Default category
+- `test_cross_user_route_access_denied` — GET/PATCH/DELETE on another user's route returns 404
+
+Tags:
+- `test_set_route_tags` — PUT tags on a route, verify tags returned in route object
+- `test_set_category_tags` — PUT tags on a category
+- `test_tags_auto_created` — setting a new tag name creates the tag record
+- `test_tags_case_insensitive_dedup` — "Hilly" and "hilly" resolve to the same tag
+- `test_list_tags_with_counts` — GET `/api/tags` returns usage counts
+- `test_delete_tag` — removes tag and unlinks from all routes/categories
+- `test_tags_per_user_isolated` — user A's tags not visible to user B
+- `test_upload_requires_title` — upload without title and GPX has no `<name>` returns 400
+
 Proxy:
 - `test_valhalla_proxy` — mock upstream, verify request forwarded and response returned
 - `test_nominatim_proxy` — mock upstream, verify request forwarded
@@ -266,7 +341,11 @@ Library page:
 - `test_rename_category` — rename a category, verify updated
 - `test_move_route_between_categories` — move a route, verify it appears under new category
 - `test_edit_route_metadata` — edit title/description/notes, verify saved
-- `test_delete_route` — delete with confirmation, verify removed from list
+- `test_delete_route_inline_confirm` — delete shows inline modal (not browser alert), confirm removes route
+- `test_delete_route_cancel` — cancel in the inline modal leaves route in place
+- `test_add_tags_to_route` — add tags via tag input, verify tag chips appear
+- `test_tag_cloud_filters` — click a tag in the tag cloud, verify route list filtered
+- `test_upload_requires_title` — upload with no title shows validation error
 
 Analysis page:
 - `test_analysis_page_loads_map` — map renders with route visible
@@ -309,10 +388,26 @@ Analysis page:
     superpowers/specs/    # This spec
 ```
 
-## Out of Scope
+## User Identity
 
-- Authentication/authorisation (single-operator tool)
-- Multi-user concurrent access
-- Route comparison (side-by-side analysis of two routes)
-- GPX editing or route planning
+Flask reads the user identity from the request header specified by `AUTH_USER_HEADER` (default: `Remote-User`). This header is set by the upstream Authelia/Nginx reverse proxy after authentication.
+
+- If the header is present: the value is used as the `user_id` (trimmed, lowercased)
+- If the header is absent: `user_id` defaults to `anonymous`
+- On a user's first request, their "Default" category is auto-created if it doesn't exist
+- All data operations (routes, categories) are scoped to the current `user_id`
+- No user management within the app — user accounts are managed externally by Authelia/Nginx
+
+There is no same-file multi-user editing. Each user sees and manages only their own routes and categories.
+
+## Out of Scope (Current Version)
+
+- Authentication logic (delegated to Authelia/Nginx)
+- Same-file concurrent editing across users
 - Caching of proxy responses
+
+## Planned for Future Versions
+
+- Route comparison (side-by-side analysis of two routes)
+- GPX editing and route planning
+- Route optimisation and auto-generation
