@@ -485,6 +485,9 @@ There is no same-file multi-user editing. Each user sees and manages only their 
 
 ## Planned for Future Versions
 
-- Route comparison (side-by-side analysis of two routes)
-- GPX editing and route planning
-- Route optimisation and auto-generation
+- **Route comparison** — side-by-side analysis of two routes (gradient, elevation, distance)
+- **Location bookmarks** — save map locations (independent of routes) for quick navigation and reference
+- **GPX waypoint upload** — upload a set of waypoints and auto-generate a routed path between them (via Valhalla routing)
+- **Route reversal** — reverse an existing route and recompute gradients
+- **Waypoint editing** — add, remove, and reorder waypoints on an existing route, regenerating the path between them
+- **Route optimisation and auto-generation** — generate optimal routes given constraints (distance, max gradient, surface type)
