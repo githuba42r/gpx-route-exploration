@@ -228,6 +228,70 @@ When a GPX file is uploaded, the server parses it to extract metadata:
 
 This reuses the same algorithms as the frontend (ported to Python) for consistency.
 
+## Automated Backups
+
+A background thread within the Flask process runs periodic backups of the SQLite database and all GPX files into date-stamped tarballs stored in the data volume.
+
+### Backup Contents
+
+Each backup is a gzipped tarball containing:
+- `routes.db` (SQLite database — copied via `sqlite3` `.backup` API for consistency)
+- `gpx/` directory tree (all user folders, category folders, and GPX files)
+
+### Storage Location
+
+```
+$DATA_DIR/
+  backups/
+    daily/
+      backup-2026-04-16.tar.gz
+      backup-2026-04-15.tar.gz
+      ...
+    weekly/
+      backup-2026-04-14.tar.gz
+      ...
+    monthly/
+      backup-2026-04-01.tar.gz
+      ...
+    yearly/
+      backup-2026-01-01.tar.gz
+      ...
+```
+
+### Schedule and Retention
+
+The backup process runs once per hour. On each run it:
+
+1. Creates a new daily backup (`backup-YYYY-MM-DD.tar.gz`) if one doesn't already exist for today
+2. Promotes and purges according to retention tiers:
+
+| Tier | Retention | Promotion Rule |
+|------|-----------|---------------|
+| Daily | 7 backups | Created every day |
+| Weekly | 6 backups | Oldest daily beyond 7 days is promoted (moved) to weekly |
+| Monthly | 13 backups | Oldest weekly beyond 6 weeks is promoted to monthly |
+| Yearly | Unlimited | Oldest monthly beyond 13 months is promoted to yearly |
+
+Promotion logic: when a backup ages out of its tier, it is moved (renamed) into the next tier's folder rather than deleted. Only backups that are superseded within their tier are removed. This ensures there is always a recovery point at each granularity.
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BACKUP_ENABLED` | `true` | Set to `false` to disable automatic backups |
+| `BACKUP_INTERVAL_HOURS` | `1` | Hours between backup checks |
+| `BACKUP_DAILY_KEEP` | `7` | Number of daily backups to retain |
+| `BACKUP_WEEKLY_KEEP` | `6` | Number of weekly backups to retain |
+| `BACKUP_MONTHLY_KEEP` | `13` | Number of monthly backups to retain |
+
+### Implementation
+
+- Runs as a `threading.Timer` daemon thread started on app init (not a separate process or cron)
+- Uses Python `sqlite3` backup API (`connection.backup()`) for a consistent DB snapshot without locking the application
+- Tarball creation uses Python `tarfile` module
+- Backup and purge logic in a dedicated `backup.py` module with its own unit tests
+- Logs backup/promote/purge actions at INFO level
+
 ## Docker
 
 ### Dockerfile
@@ -314,6 +378,17 @@ Tags:
 - `test_tags_per_user_isolated` — user A's tags not visible to user B
 - `test_upload_requires_title` — upload without title and GPX has no `<name>` returns 400
 
+Backup (`tests/test_backup.py`):
+- `test_create_daily_backup` — run backup, verify tarball created in daily/ with correct contents
+- `test_backup_contains_db_and_gpx` — extract tarball, verify routes.db and gpx/ tree present
+- `test_skip_duplicate_daily` — run twice same day, only one tarball exists
+- `test_daily_purge_promotes_to_weekly` — create 8 dailies, run purge, oldest moved to weekly/
+- `test_weekly_purge_promotes_to_monthly` — create 7 weeklies, oldest promoted to monthly/
+- `test_monthly_purge_promotes_to_yearly` — create 14 monthlies, oldest promoted to yearly/
+- `test_yearly_never_purged` — yearly backups accumulate without deletion
+- `test_backup_db_consistency` — backup taken while writes are happening still produces valid SQLite
+- `test_backup_disabled` — set BACKUP_ENABLED=false, verify no backups created
+
 Proxy:
 - `test_valhalla_proxy` — mock upstream, verify request forwarded and response returned
 - `test_nominatim_proxy` — mock upstream, verify request forwarded
@@ -365,6 +440,7 @@ Analysis page:
   gpx_parser.py           # GPX parsing and stats computation (Python port)
   models.py               # SQLite schema init, query helpers
   proxy.py                # Valhalla/Nominatim proxy blueprint
+  backup.py               # Automated backup, promotion, and purge logic
   templates/
     library.html          # Route library page
     analysis.html         # Analysis page (wraps existing index.html)
@@ -376,6 +452,7 @@ Analysis page:
   tests/
     conftest.py           # Shared fixtures (app, client, sample GPX, server)
     test_api.py           # API tests
+    test_backup.py        # Backup, promotion, and purge tests
     test_ui.py            # Playwright UI tests
     fixtures/
       sample.gpx          # Minimal valid GPX for testing
