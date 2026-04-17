@@ -31,11 +31,25 @@ def test_request_body_shape():
     )
     assert body["costing"] == "bicycle"
     assert body["costing_options"]["bicycle"]["use_hills"] == 0.5
+    # Every location carries a search radius so near-road pins snap reliably.
     assert body["locations"] == [
-        {"lat": -27.4, "lon": 152.9, "type": "break"},
-        {"lat": -27.5, "lon": 152.8, "type": "break"},
+        {"lat": -27.4, "lon": 152.9, "type": "break", "radius": 100},
+        {"lat": -27.5, "lon": 152.8, "type": "break", "radius": 100},
     ]
     assert body["elevation_interval"] == 10
+
+
+def test_request_body_applies_radius_to_every_location():
+    body = vc.build_request_body(
+        waypoints=[(0, 0), (1, 1), (2, 2)],
+        profile="bicycle",
+        kinds=["stop", "waypoint", "stop"],
+        round_trip=True,
+    )
+    # All three original locations + the synthetic round-trip close.
+    assert len(body["locations"]) == 4
+    for loc in body["locations"]:
+        assert loc["radius"] == 100
 
 
 def test_call_success(app):

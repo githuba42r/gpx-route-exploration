@@ -39,14 +39,22 @@ def build_request_body(waypoints, profile, costing_options=None, round_trip=Fals
     n = len(waypoints)
     if kinds is None:
         kinds = ["stop"] * n
+    # Per-location search radius (metres). Tells Valhalla to snap any pin
+    # whose closest candidate edge is within this distance — dramatically
+    # reduces the 499 "Could not find candidate edge used for destination
+    # label" error for pins placed near but not exactly on a road or
+    # cycle-able track. 100 m is a sweet spot: tight enough that we don't
+    # route wildly far from the user's click, loose enough that clicks at
+    # trail edges, park entrances, etc. still resolve.
+    RADIUS_M = 100
     locs = []
     for i, (lat, lon) in enumerate(waypoints):
         is_endpoint = i == 0 or i == n - 1
         loc_type = "break" if (is_endpoint or kinds[i] == "stop") else "through"
-        locs.append({"lat": lat, "lon": lon, "type": loc_type})
+        locs.append({"lat": lat, "lon": lon, "type": loc_type, "radius": RADIUS_M})
     if round_trip and waypoints:
         lat, lon = waypoints[0]
-        locs.append({"lat": lat, "lon": lon, "type": "break"})
+        locs.append({"lat": lat, "lon": lon, "type": "break", "radius": RADIUS_M})
 
     body = {
         "locations": locs,
