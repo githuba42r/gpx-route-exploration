@@ -1,9 +1,32 @@
 // --- Create Route page entry point ---
+//
+// Responsibilities:
+//   - Auto-create a recipe-only route on first load; keep route_id in the URL
+//   - Click map → append waypoint; right-click pin → toggle stop/waypoint
+//   - Drag sidebar rows to reorder; X to remove; pin-first-as-start checkbox
+//   - Dashed live-preview polyline between waypoints
+//   - Generate Route: call Valhalla via /api/routes/<id>/generate.
+//     • Auto-generate mode (toggle + settings popover) debounces + rate-limits
+//     • Manual "Generate Now" button still rate-limited
+//   - Draw the generated road-snapped track on this page (decode polylines
+//     client-side), replacing the dashed preview section
+//   - Structured error panel on failure — shows our endpoint and the upstream
+//     Valhalla URL/body separately
 
 import { initCreateMap, fitToWaypoints } from './map.js';
 import { renderMarkers } from '../shared/waypoint-markers.js';
 import { mountWaypointEditor } from '../shared/waypoint-editor.js';
+import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
+
+// Global rate limit: minimum ms between successful /generate calls regardless
+// of trigger (auto debounce or manual click).
+const GLOBAL_RATE_LIMIT_MS = 5000;
+
+const STORAGE_AUTO = 'gpx-create-auto-generate';
+const STORAGE_DEBOUNCE = 'gpx-create-debounce-ms';
+
+// -------------------- route bootstrap --------------------
 
 async function ensureRouteId() {
   const url = new URL(window.location.href);
@@ -16,32 +39,48 @@ async function ensureRouteId() {
   return route.id;
 }
 
+// -------------------- drawing --------------------
+
 function updatePreviewLine(state) {
-  // Dashed cyan line through included waypoints in order — "here's the shape
-  // of your route before you pay Valhalla for it". Replaced by the real track
-  // on the analysis page once Generate Route lands.
   const pts = state.waypoints
     .filter(w => w.included !== 0 && w.lat != null && w.lon != null)
     .map(w => [w.lat, w.lon]);
 
-  if (state.previewLine) {
-    state.map.removeLayer(state.previewLine);
-    state.previewLine = null;
-  }
+  if (state.previewLine) { state.map.removeLayer(state.previewLine); state.previewLine = null; }
   if (pts.length < 2) return;
   state.previewLine = L.polyline(pts, {
-    color: '#00e5ff',
-    weight: 3,
-    opacity: 0.85,
-    dashArray: '6 8',
-    interactive: false,
+    color: '#00e5ff', weight: 3, opacity: 0.85, dashArray: '6 8', interactive: false,
   }).addTo(state.map);
-  // Keep the dashed preview below the markers so they remain clickable.
   if (state.previewLine.bringToBack) state.previewLine.bringToBack();
 }
 
-async function reloadWaypoints(state, editor) {
+function clearGeneratedLayer(state) {
+  if (state.generatedLayer) { state.map.removeLayer(state.generatedLayer); state.generatedLayer = null; }
+}
+
+function drawGeneratedRoute(state, legs) {
+  clearGeneratedLayer(state);
+  const allLatLngs = [];
+  for (const leg of legs) {
+    if (!leg.polyline) continue;
+    const decoded = decodePolyline(leg.polyline, 6);
+    if (allLatLngs.length && decoded.length && allLatLngs[allLatLngs.length - 1][0] === decoded[0][0] &&
+        allLatLngs[allLatLngs.length - 1][1] === decoded[0][1]) {
+      decoded.shift();
+    }
+    for (const p of decoded) allLatLngs.push(p);
+  }
+  if (allLatLngs.length < 2) return;
+  state.generatedLayer = L.polyline(allLatLngs, {
+    color: '#ff5f15', weight: 4, opacity: 0.9, interactive: false,
+  }).addTo(state.map);
+}
+
+// -------------------- waypoint reload + change version bump --------------------
+
+async function reloadWaypoints(state, editor, { bump = true } = {}) {
   state.waypoints = await api.listWaypoints(state.routeId);
+  if (bump) state.currentVersion += 1;
   editor.setWaypoints(state.waypoints);
   state.markers = renderMarkers(
     state.map, state.waypoints, state.markers,
@@ -49,22 +88,173 @@ async function reloadWaypoints(state, editor) {
       draggable: true,
       onDragEnd: async (w, { lat, lon }) => {
         await api.patchWaypoint(state.routeId, w.id, { lat, lon });
-        await reloadWaypoints(state, editor);
+        await onWaypointsChanged(state, editor);
       },
       onContextMenu: async (w) => {
         const nextKind = w.kind === 'stop' ? 'waypoint' : 'stop';
         await api.patchWaypoint(state.routeId, w.id, { kind: nextKind });
-        await reloadWaypoints(state, editor);
+        await onWaypointsChanged(state, editor);
       },
     },
   );
   updatePreviewLine(state);
+  // If waypoints changed since last successful generate, the generated track
+  // is stale — drop it so the user isn't looking at a line that no longer
+  // matches their stops.
+  if (state.generatedVersion !== state.currentVersion) {
+    clearGeneratedLayer(state);
+  }
   const pinCb = document.getElementById('pin-start-cb');
   if (pinCb) {
     pinCb.checked = state.waypoints.length > 0 && state.waypoints[0].pin_role === 'start';
     pinCb.disabled = state.waypoints.length === 0;
   }
 }
+
+async function onWaypointsChanged(state, editor) {
+  await reloadWaypoints(state, editor);
+  if (state.autoGenerate) scheduleGenerate(state);
+}
+
+// -------------------- generate state machine --------------------
+
+function setStatus(text, cls = 'idle') {
+  const el = document.getElementById('generate-status');
+  el.textContent = text;
+  el.className = `gen-status-${cls}`;
+}
+
+function clearError() { document.getElementById('generate-error').style.display = 'none'; }
+
+function showError(err) {
+  const el = document.getElementById('generate-error');
+  const upstream = err.upstreamUrl ? `<div class="err-upstream">Upstream: ${escapeHtml(err.upstreamUrl)}${err.upstreamBody ? `\n\n${escapeHtml(err.upstreamBody)}` : ''}</div>` : '';
+  const detail = err.detail ? `<div class="err-upstream">${escapeHtml(err.detail)}</div>` : '';
+  el.innerHTML = `
+    <button class="err-dismiss" type="button" title="Dismiss">&times;</button>
+    <strong>Route generation failed.</strong>
+    <span class="err-source">(backend endpoint ${escapeHtml(err.endpoint || '/api/routes/?/generate')} returned ${err.status ?? '—'})</span>
+    ${upstream || detail}
+  `;
+  el.querySelector('.err-dismiss').addEventListener('click', clearError);
+  el.style.display = 'block';
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function scheduleGenerate(state) {
+  if (state.pendingTimer) clearTimeout(state.pendingTimer);
+  const delay = Math.max(0, state.debounceMs);
+  setStatus(`Pending (${(delay / 1000).toFixed(1)}s)`, 'pending');
+  state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, delay);
+}
+
+async function tryGenerate(state) {
+  if (state.isGenerating) {
+    // Someone's mid-flight. Reschedule a small nudge ahead.
+    state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, 500);
+    setStatus('Pending (in-flight)', 'pending');
+    return;
+  }
+  const elapsed = Date.now() - state.lastGenerateAt;
+  if (elapsed < GLOBAL_RATE_LIMIT_MS) {
+    const wait = GLOBAL_RATE_LIMIT_MS - elapsed;
+    setStatus(`Rate-limited (${Math.ceil(wait / 1000)}s)`, 'rate');
+    state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, wait);
+    return;
+  }
+  await doGenerate(state);
+}
+
+async function doGenerate(state) {
+  if (state.waypoints.length < 2) {
+    setStatus('Need ≥ 2 waypoints', 'err');
+    return;
+  }
+  state.isGenerating = true;
+  const version = state.currentVersion;
+  setStatus('Generating…', 'busy');
+  clearError();
+  try {
+    const endpoint = `/api/routes/${state.routeId}/generate`;
+    const resp = await fetch(endpoint, { method: 'POST' });
+    const text = await resp.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+
+    if (!resp.ok) {
+      showError({
+        endpoint,
+        status: resp.status,
+        detail: body.detail || body.error || text,
+        upstreamUrl: body.upstream_url,
+        upstreamBody: body.upstream_body,
+      });
+      setStatus(`Error ${resp.status}`, 'err');
+      return;
+    }
+    // Success — draw route, update status.
+    state.lastGenerateAt = Date.now();
+    state.generatedVersion = version;
+    if (version === state.currentVersion) {
+      drawGeneratedRoute(state, body.legs || []);
+    } else {
+      // Waypoints were changed while the generate was in flight — drop this
+      // stale result and let the debounce timer kick another round.
+      clearGeneratedLayer(state);
+      if (state.autoGenerate) scheduleGenerate(state);
+    }
+    const km = body.distance_km?.toFixed ? body.distance_km.toFixed(1) : '?';
+    const mins = body.duration_s ? Math.round(body.duration_s / 60) : '?';
+    setStatus(`Ready · ${km} km · ${mins} min`, 'ok');
+  } catch (err) {
+    showError({
+      endpoint: `/api/routes/${state.routeId}/generate`,
+      status: '—',
+      detail: err.message,
+    });
+    setStatus('Network error', 'err');
+  } finally {
+    state.isGenerating = false;
+  }
+}
+
+// -------------------- settings persistence --------------------
+
+function loadPrefs(state) {
+  const savedAuto = localStorage.getItem(STORAGE_AUTO);
+  const savedDebounce = parseInt(localStorage.getItem(STORAGE_DEBOUNCE) || '', 10);
+  state.autoGenerate = savedAuto === '1';
+  state.debounceMs = (Number.isFinite(savedDebounce) && savedDebounce >= 1000) ? savedDebounce : 5000;
+}
+
+function savePrefs(state) {
+  localStorage.setItem(STORAGE_AUTO, state.autoGenerate ? '1' : '0');
+  localStorage.setItem(STORAGE_DEBOUNCE, String(state.debounceMs));
+}
+
+function reflectAutoToggle(state) {
+  const btn = document.getElementById('btn-auto-toggle');
+  const gearBtn = document.getElementById('btn-gen-settings');
+  const nowBtn = document.getElementById('btn-generate-now');
+  btn.dataset.state = state.autoGenerate ? 'on' : 'off';
+  btn.textContent = state.autoGenerate ? 'Auto-generate: ON' : 'Auto-generate: OFF';
+  gearBtn.style.display = state.autoGenerate ? '' : 'none';
+  // Generate Now is always available — even when auto is on you might want to
+  // force an immediate call without waiting for debounce.
+  nowBtn.style.display = '';
+}
+
+function reflectDebounce(state) {
+  const secs = Math.round(state.debounceMs / 1000);
+  document.getElementById('debounce-slider').value = String(secs);
+  document.getElementById('debounce-seconds').value = String(secs);
+}
+
+// -------------------- main --------------------
 
 async function main() {
   const state = {
@@ -73,8 +263,17 @@ async function main() {
     waypoints: [],
     markers: [],
     previewLine: null,
+    generatedLayer: null,
+    currentVersion: 0,
+    generatedVersion: -1,
+    autoGenerate: false,
+    debounceMs: 5000,
+    pendingTimer: null,
+    isGenerating: false,
+    lastGenerateAt: 0,
   };
 
+  loadPrefs(state);
   state.routeId = await ensureRouteId();
   state.map = initCreateMap('map');
 
@@ -83,74 +282,104 @@ async function main() {
     {
       onReorder: async (orderedIds) => {
         await api.reorderWaypoints(state.routeId, orderedIds);
-        await reloadWaypoints(state, editor);
+        await onWaypointsChanged(state, editor);
       },
       onRemove: async (wptId) => {
         await api.deleteWaypoint(state.routeId, wptId);
-        await reloadWaypoints(state, editor);
+        await onWaypointsChanged(state, editor);
       },
     },
   );
 
-  await reloadWaypoints(state, editor);
+  await reloadWaypoints(state, editor, { bump: false });
   fitToWaypoints(state.map, state.waypoints);
 
+  // --- Auto-generate controls ---
+  reflectAutoToggle(state);
+  reflectDebounce(state);
+
+  document.getElementById('btn-auto-toggle').addEventListener('click', () => {
+    state.autoGenerate = !state.autoGenerate;
+    savePrefs(state);
+    reflectAutoToggle(state);
+    if (state.autoGenerate) {
+      scheduleGenerate(state);
+    } else {
+      if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
+      setStatus('Idle', 'idle');
+      document.getElementById('gen-settings-popover').style.display = 'none';
+    }
+  });
+
+  const popover = document.getElementById('gen-settings-popover');
+  document.getElementById('btn-gen-settings').addEventListener('click', (e) => {
+    e.stopPropagation();
+    popover.style.display = popover.style.display === 'none' ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && e.target.id !== 'btn-gen-settings') {
+      popover.style.display = 'none';
+    }
+  });
+
+  const slider = document.getElementById('debounce-slider');
+  const numInput = document.getElementById('debounce-seconds');
+  function setDebounceSecs(secs) {
+    secs = Math.max(1, Math.min(30, parseInt(secs, 10) || 5));
+    state.debounceMs = secs * 1000;
+    slider.value = String(secs);
+    numInput.value = String(secs);
+    savePrefs(state);
+  }
+  slider.addEventListener('input', (e) => setDebounceSecs(e.target.value));
+  numInput.addEventListener('change', (e) => setDebounceSecs(e.target.value));
+
+  document.getElementById('btn-generate-now').addEventListener('click', () => {
+    if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
+    tryGenerate(state);
+  });
+
+  // --- Map click → append waypoint ---
   state.map.on('click', async (e) => {
     const n = state.waypoints.length + 1;
     await api.appendWaypoint(state.routeId, {
-      name: `Waypoint ${n}`,
-      lat: e.latlng.lat,
-      lon: e.latlng.lng,
-      kind: 'waypoint',
+      name: `Waypoint ${n}`, lat: e.latlng.lat, lon: e.latlng.lng, kind: 'waypoint',
     });
-    await reloadWaypoints(state, editor);
+    await onWaypointsChanged(state, editor);
   });
 
+  // --- Pin-start checkbox ---
   document.getElementById('pin-start-cb').addEventListener('change', async (e) => {
     if (state.waypoints.length === 0) return;
     const firstId = state.waypoints[0].id;
-    await api.patchWaypoint(state.routeId, firstId,
-                            { pin_role: e.target.checked ? 'start' : null });
-    await reloadWaypoints(state, editor);
+    await api.patchWaypoint(state.routeId, firstId, { pin_role: e.target.checked ? 'start' : null });
+    await onWaypointsChanged(state, editor);
   });
 
+  // --- Title blur → persist ---
   document.getElementById('route-title').addEventListener('blur', async (e) => {
     const title = e.target.value.trim();
     if (!title) return;
     await fetch(`/api/routes/${state.routeId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     });
   });
 
+  // --- Save (no-op; edits already persist per-action) ---
   document.getElementById('btn-save').addEventListener('click', () => {
     const btn = document.getElementById('btn-save');
     const orig = btn.textContent;
     btn.textContent = 'Saved ✓';
     setTimeout(() => { btn.textContent = orig; }, 1200);
   });
-
-  document.getElementById('btn-generate').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-generate');
-    if (state.waypoints.length < 2) {
-      alert('Add at least two waypoints before generating.');
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Generating…';
-    try {
-      await api.generateRoute(state.routeId);
-      window.location.href = `/route/${state.routeId}`;
-    } catch (err) {
-      alert('Generate failed: ' + err.message);
-      btn.disabled = false;
-      btn.textContent = 'Generate Route';
-    }
-  });
 }
 
 main().catch(err => {
   console.error(err);
-  alert('Create page failed to load: ' + err.message);
+  const el = document.getElementById('generate-error');
+  if (el) {
+    el.innerHTML = `<strong>Create page failed to load.</strong> <span class="err-source">${escapeHtml(err.message)}</span>`;
+    el.style.display = 'block';
+  }
 });
