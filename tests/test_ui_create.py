@@ -321,6 +321,56 @@ def test_leading_edge_fires_then_cooldown(page, server_url):
     expect(page.locator("#gen-primary-countdown")).to_be_visible()
 
 
+def test_click_snaps_to_nearby_road(page, server_url):
+    """When Valhalla's /locate returns a road within 10 m, the new waypoint
+    is persisted at the snapped coordinates, not the raw click point."""
+    _goto_create_fresh(page, server_url)
+    # Mock /proxy/valhalla/locate: return a correlated point 5 m away, well
+    # within the 10 m snap threshold.
+    page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body='[{"input_lat":-27.0,"input_lon":152.0,"edges":['
+             '{"correlated_lat":-27.00002,"correlated_lon":152.00002,"distance":5.0}'
+             ']}]',
+    ))
+    _click_map_at(page, "#map", 0.5, 0.5)
+    # Wait for the appended row.
+    expect(page.locator(".wpe-item").first).to_be_visible(timeout=3000)
+    # Read back the route's waypoints via the REST API to confirm coords.
+    # We don't know the route_id cleanly from here, so check via in-page fetch.
+    wpt = page.evaluate("""async () => {
+      const rid = new URL(location.href).searchParams.get('route_id');
+      const r = await fetch(`/api/routes/${rid}/waypoints`);
+      return (await r.json())[0];
+    }""")
+    # The mock returns -27.00002 as correlated_lat. Exact match.
+    assert abs(wpt["lat"] - (-27.00002)) < 1e-9, f"lat not snapped: {wpt}"
+    assert abs(wpt["lon"] - 152.00002) < 1e-9, f"lon not snapped: {wpt}"
+
+
+def test_click_does_not_snap_when_road_too_far(page, server_url):
+    """When the nearest road is > 10 m away, the raw click coords are kept."""
+    _goto_create_fresh(page, server_url)
+    # Capture the click coordinates that app.js will send.
+    page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body='[{"edges":[{"correlated_lat":99.999,"correlated_lon":99.999,"distance":250.0}]}]',
+    ))
+    _click_map_at(page, "#map", 0.5, 0.5)
+    expect(page.locator(".wpe-item").first).to_be_visible(timeout=3000)
+    wpt = page.evaluate("""async () => {
+      const rid = new URL(location.href).searchParams.get('route_id');
+      const r = await fetch(`/api/routes/${rid}/waypoints`);
+      return (await r.json())[0];
+    }""")
+    # The faraway mocked coord (99.999, 99.999) must NOT be used because
+    # distance exceeds 10 m; instead the real click point is kept.
+    assert wpt["lat"] != 99.999 and wpt["lon"] != 99.999, \
+        f"snapped despite distance 250 m: {wpt}"
+
+
 def test_pin_offroad_triggers_actionable_guidance(page, server_url):
     """A Valhalla 499 error surfaces guidance text in the error panel, not
     just the raw upstream body."""

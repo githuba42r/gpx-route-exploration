@@ -30,6 +30,66 @@ import * as api from '../shared/route-api.js';
 const STORAGE_AUTO = 'gpx-create-auto-generate';
 const STORAGE_DEBOUNCE = 'gpx-create-debounce-ms';
 
+// -------------------- snap-to-road --------------------
+//
+// Before appending / moving a waypoint, ask Valhalla's /locate endpoint
+// what the nearest bicycle-routable road/path is. If it's within 10 m of
+// the clicked point, use those snapped coords — dramatically improves
+// /generate success rates since the first and last pins must be
+// break-type (edge-snappable). 10 m is deliberately conservative: we
+// don't want to yank a pin off-road that the user placed deliberately.
+//
+// Short timeout so we don't hold up the UI when Valhalla is slow or
+// unreachable — we silently fall back to the user's raw coords.
+
+const SNAP_MAX_DISTANCE_M = 10;
+const SNAP_TIMEOUT_MS = 1500;
+
+async function maybeSnapToRoad(lat, lon) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), SNAP_TIMEOUT_MS);
+    const resp = await fetch('/proxy/valhalla/locate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat, lon }],
+        costing: 'bicycle',
+        verbose: false,
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return { lat, lon, snapped: false };
+    const body = await resp.json();
+    const edges = (body?.[0]?.edges) || [];
+    if (!edges.length) return { lat, lon, snapped: false };
+    // Valhalla orders edges by proximity; edges[0] is the closest.
+    const best = edges[0];
+    const snappedLat = best.correlated_lat;
+    const snappedLon = best.correlated_lon;
+    if (snappedLat == null || snappedLon == null) return { lat, lon, snapped: false };
+    const dist = (best.distance != null)
+      ? best.distance
+      : haversineMeters(lat, lon, snappedLat, snappedLon);
+    if (dist > SNAP_MAX_DISTANCE_M) return { lat, lon, snapped: false, distanceM: dist };
+    return { lat: snappedLat, lon: snappedLon, snapped: true, distanceM: dist };
+  } catch (_) {
+    // Aborted, network error, or bad JSON — silently fall back.
+    return { lat, lon, snapped: false };
+  }
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // -------------------- route bootstrap --------------------
 
 async function ensureRouteId() {
@@ -91,7 +151,8 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
     {
       draggable: true,
       onDragEnd: async (w, { lat, lon }) => {
-        await api.patchWaypoint(state.routeId, w.id, { lat, lon });
+        const snap = await maybeSnapToRoad(lat, lon);
+        await api.patchWaypoint(state.routeId, w.id, { lat: snap.lat, lon: snap.lon });
         await onWaypointsChanged(state, editor);
       },
       onContextMenu: async (w) => {
@@ -573,8 +634,9 @@ async function main() {
   state.clickCounter = state.waypoints.length;
   state.map.on('click', async (e) => {
     const n = ++state.clickCounter;
+    const snap = await maybeSnapToRoad(e.latlng.lat, e.latlng.lng);
     await api.appendWaypoint(state.routeId, {
-      name: `Waypoint ${n}`, lat: e.latlng.lat, lon: e.latlng.lng, kind: 'waypoint',
+      name: `Waypoint ${n}`, lat: snap.lat, lon: snap.lon, kind: 'waypoint',
     });
     await onWaypointsChanged(state, editor);
   });
