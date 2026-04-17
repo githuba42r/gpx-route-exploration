@@ -120,3 +120,20 @@ def test_cross_user_route_access_denied(client, sample_gpx):
     route_id = up.get_json()["id"]
     resp = client.get(f"/api/routes/{route_id}", headers={"Remote-User": "user-b"})
     assert resp.status_code == 404
+
+
+def test_create_recipe_only_route(client):
+    r = client.post(
+        "/api/routes",
+        json={"title": "Recipe only", "profile": "bicycle"},
+        content_type="application/json",
+    )
+    assert r.status_code == 201, r.data
+    body = r.get_json()
+    assert body["title"] == "Recipe only"
+    # storage_name must be populated (used later for the generated GPX path).
+    assert body["storage_name"]
+    # The route is retrievable via the existing GET endpoint.
+    rid = body["id"]
+    got = client.get(f"/api/routes/{rid}").get_json()
+    assert "id" in got

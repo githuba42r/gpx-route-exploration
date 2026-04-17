@@ -27,27 +27,27 @@ def ensure_default():
 def upload_route():
     user_id = get_current_user()
 
-    # --- File ---
+    # --- JSON recipe-only creation (M1) ---
+    if request.is_json:
+        return _create_recipe_only(user_id, request.get_json() or {})
+
+    # --- Existing multipart upload path ---
     file = request.files.get("file")
     if file is None:
         return jsonify({"error": "No file provided"}), 400
-
     raw = file.read()
 
-    # --- Parse GPX ---
     try:
         stats = parse_gpx(raw)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    # --- Title resolution ---
     title = (request.form.get("title") or "").strip()
     if not title:
         title = (stats.get("name") or "").strip()
     if not title:
         return jsonify({"error": "title is required when GPX has no <name>"}), 400
 
-    # --- Determine category ---
     category_id_param = request.form.get("category_id")
     if category_id_param:
         category = get_category(user_id, int(category_id_param))
@@ -57,8 +57,6 @@ def upload_route():
         category = ensure_default_category(user_id)
 
     category_slug = category["slug"]
-
-    # --- Store file on disk ---
     data_dir = current_app.config["DATA_DIR"]
     store_dir = os.path.join(data_dir, "gpx", user_id, category_slug)
     os.makedirs(store_dir, exist_ok=True)
@@ -68,7 +66,6 @@ def upload_route():
     with open(file_path, "wb") as f:
         f.write(raw)
 
-    # --- Create DB record ---
     original_filename = file.filename or "upload.gpx"
     route = create_route(
         user_id=user_id,
@@ -83,7 +80,37 @@ def upload_route():
         max_gradient_desc=stats.get("max_gradient_desc"),
         point_count=stats.get("point_count"),
     )
+    return jsonify(route), 201
 
+
+def _create_recipe_only(user_id, data):
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+    profile = data.get("profile") or "bicycle"
+    if profile not in ("bicycle", "pedestrian", "auto"):
+        return jsonify({"error": f"invalid profile: {profile}"}), 400
+
+    category_id_param = data.get("category_id")
+    if category_id_param:
+        category = get_category(user_id, int(category_id_param))
+        if category is None:
+            return jsonify({"error": "Category not found"}), 404
+    else:
+        category = ensure_default_category(user_id)
+
+    storage_name = f"{uuid.uuid4().hex}.gpx"
+    filename = f"{title}.gpx"
+
+    route = create_route(
+        user_id=user_id,
+        category_id=category["id"],
+        filename=filename,
+        storage_name=storage_name,
+        title=title,
+    )
+    from server.models import waypoints as wp_model
+    wp_model.update_options(route["id"], profile=profile)
     return jsonify(route), 201
 
 
