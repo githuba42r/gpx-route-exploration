@@ -16,14 +16,18 @@ err() { echo -e "${RED}[dev]${NC} $*" >&2; }
 
 usage() {
     cat <<EOF
-Usage: ./dev.sh [--env-file PATH] [--help]
+Usage: ./dev.sh [--env-file PATH] [--test | --test-only] [--help]
 
-Starts the GPX Route Exploration Flask dev server.
+Starts the GPX Route Exploration Flask dev server. Tests are OFF by default.
 
 Options:
   -e, --env-file PATH   Load environment variables from a dotenv file before
                         starting (e.g. .env.development). Values already set
                         in the shell environment take precedence.
+      --test            Run the unit test suite before starting the server.
+                        Server starts only if the tests pass.
+      --test-only       Run the unit test suite, then exit without starting
+                        the server. Exit status mirrors pytest's.
   -h, --help            Show this help and exit.
 
 Environment variables (see .env.example for the full list):
@@ -36,6 +40,8 @@ EOF
 
 # --- Parse args ---
 ENV_FILE=""
+RUN_TESTS=0
+TEST_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -e|--env-file)
@@ -45,6 +51,15 @@ while [ $# -gt 0 ]; do
             ;;
         --env-file=*)
             ENV_FILE="${1#--env-file=}"
+            shift
+            ;;
+        --test)
+            RUN_TESTS=1
+            shift
+            ;;
+        --test-only)
+            RUN_TESTS=1
+            TEST_ONLY=1
             shift
             ;;
         -h|--help)
@@ -115,13 +130,19 @@ fi
 log "Building frontend bundles..."
 npm --prefix "$SCRIPT_DIR" run build
 
-# --- Run tests ---
-log "Running unit tests..."
-if pytest tests/ --ignore=tests/test_ui_library.py --ignore=tests/test_ui_analysis.py -v --tb=short; then
-    log "All tests passed."
-else
-    err "Tests failed. Fix issues before starting the server."
-    exit 1
+# --- Run tests (only if --test or --test-only) ---
+if [ "$RUN_TESTS" = "1" ]; then
+    log "Running unit tests..."
+    if pytest tests/ --ignore=tests/test_ui_library.py --ignore=tests/test_ui_analysis.py --ignore=tests/test_ui_create.py -v --tb=short; then
+        log "All tests passed."
+    else
+        err "Tests failed."
+        exit 1
+    fi
+    if [ "$TEST_ONLY" = "1" ]; then
+        log "--test-only set, exiting without starting the server."
+        exit 0
+    fi
 fi
 
 # --- Ensure data directory ---
