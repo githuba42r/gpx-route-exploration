@@ -92,65 +92,9 @@
 }
 #gen-menu .menu-reset:hover { color:#e6edf5; background:#0f3460; }
 
-/* --- Pin context menu (right-click on a map marker) --- */
-#pin-ctx-menu {
-  position:fixed; z-index:1400;
-  background:#0f1d3a; border:1px solid #0f3460; border-radius:6px;
-  padding:4px 0; min-width:200px; box-shadow:0 6px 20px rgba(0,0,0,0.5);
-  font-size:0.85em;
-}
-#pin-ctx-menu .ctx-header {
-  padding:6px 12px 8px; border-bottom:1px solid #0f3460;
-  color:#a0a0b0; font-size:0.75em; text-transform:uppercase; letter-spacing:0.5px;
-}
-#pin-ctx-menu button {
-  display:block; width:100%; text-align:left;
-  background:transparent; border:none; color:#e6edf5;
-  padding:7px 12px; cursor:pointer; font-size:0.9em;
-}
-#pin-ctx-menu button:hover { background:#0f3460; }
-#pin-ctx-menu button.danger       { color:#ff8896; }
-#pin-ctx-menu button.danger:hover { background:rgba(255,71,87,0.2); color:#fff; }
-#pin-ctx-menu button.confirm-danger { background:#ff4757; color:#fff; }
-#pin-ctx-menu .ctx-sep {
-  height:1px; background:#0f3460; margin:4px 0;
-}
-
-/* --- Excluded waypoints (dimmed in sidebar + desaturated marker) --- */
-.wpe-item.wpe-excluded { opacity:0.45; text-decoration:line-through; }
-.wpe-marker.wpe-dimmed { opacity:0.35; filter:grayscale(0.7); }
-
-/* --- Stop edit modal --- */
-#stop-edit-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1500;
-  display:flex; align-items:center; justify-content:center;
-}
-#stop-edit-modal {
-  background:#0f1d3a; border:1px solid #0f3460; border-radius:8px;
-  padding:20px 24px; min-width:380px; max-width:90vw;
-  box-shadow:0 10px 40px rgba(0,0,0,0.6);
-}
-#stop-edit-modal h3 { margin:0 0 12px 0; font-size:1.1em; color:#e6edf5; }
-#stop-edit-modal label {
-  display:block; color:#a0a0b0; font-size:0.78em; text-transform:uppercase;
-  letter-spacing:0.5px; margin:10px 0 4px;
-}
-#stop-edit-modal input,
-#stop-edit-modal textarea {
-  width:100%; box-sizing:border-box;
-  background:#0a152b; border:1px solid #0f3460; color:#e6edf5;
-  padding:8px 10px; border-radius:4px; font-size:0.9em; font-family:inherit;
-}
-#stop-edit-modal textarea { resize:vertical; min-height:60px; }
-.stop-edit-actions {
-  display:flex; gap:8px; justify-content:flex-end; margin-top:16px;
-}
-.stop-edit-actions button {
-  background:#0f3460; color:#e6edf5; border:1px solid #2b3650;
-  padding:7px 14px; border-radius:4px; cursor:pointer; font-size:0.85em;
-}
-.stop-edit-actions button.primary { background:#e94560; border-color:#e94560; }
-.stop-edit-actions button:hover { filter:brightness(1.1); }
+/* Pin context menu, stop-edit modal, excluded-waypoints styling now live in
+ * src/css/waypoint-editor.css (shared with the Analysis-page Edit panel).
+ */
 
 /* Status chip (secondary indicator) */
 #generate-status {
@@ -190,64 +134,6 @@
 #map { flex:1; min-height:400px; background:#16213e; }
 #editor-panel { width:340px; background:#0f1d3a; border-left:1px solid #0f3460; overflow:auto; }
 
-/* Editor widget */
-.wpe { display:flex; flex-direction:column; height:100%; }
-.wpe-head { padding:10px 14px; border-bottom:1px solid #0f3460; display:flex; justify-content:space-between; align-items:center; font-size:0.85em; }
-.wpe-collapse { background:transparent; border:none; color:#a0a0b0; cursor:pointer; font-size:1em; }
-
-.wpe-tabs { display:flex; border-bottom:1px solid #0f3460; background:#0a152b; font-size:0.8em; }
-.wpe-tab { padding:8px 12px; color:#a0a0b0; cursor:pointer; border-bottom:2px solid transparent; flex:1; text-align:center; }
-.wpe-tab.active { color:#e6edf5; border-bottom-color:#e94560; background:#0f1d3a; }
-.wpe-count { color:#6a7a9a; font-size:0.9em; margin-left:4px; }
-
-.wpe-totals { display:flex; gap:16px; padding:8px 14px; font-size:0.78em; background:#0a152b; border-bottom:1px solid #0f3460; }
-.wpe-totals strong { color:#ff9f43; }
-
-.wpe-list { flex:1; list-style:none; padding:4px 0; margin:0; overflow:auto; }
-.wpe-empty { padding:20px 14px; color:#6a7a9a; font-size:0.85em; text-align:center; }
-
-.wpe-item {
-  display:flex; align-items:center; gap:8px; padding:10px 12px;
-  border-left:3px solid transparent; font-size:0.85em;
-}
-.wpe-item:hover { background:#16213e; }
-.wpe-item-stop { border-left-color:#ff4757; }
-.wpe-item-waypoint { border-left-color:#00e5ff; }
-.wpe-handle { color:#6a7a9a; cursor:grab; font-size:1.2em; }
-.wpe-icon {
-  width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center;
-  color:#fff; font-size:0.75em; font-weight:700; flex-shrink:0;
-}
-.wpe-icon-stop {
-  background:#ff4757;
-  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
-}
-.wpe-icon-waypoint {
-  background:#00e5ff; color:#0f1d3a;
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-}
-.wpe-body { flex:1; min-width:0; }
-.wpe-name { color:#e6edf5; }
-.wpe-sub { color:#6a7a9a; font-size:0.75em; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wpe-badge { background:#ff4757; color:#fff; font-size:0.65em; padding:1px 6px; border-radius:8px; text-transform:uppercase; }
-.wpe-remove { background:transparent; border:none; color:#6a7a9a; cursor:pointer; font-size:0.9em; padding:2px 4px; }
-.wpe-remove:hover { color:#e6edf5; }
-
-/* Leaflet marker styling (divIcons) */
-.wpe-marker { display:flex; align-items:center; justify-content:center; color:#fff; font-size:0.75em; font-weight:700; }
-.wpe-stop {
-  width:30px; height:30px; background:#ff4757;
-  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
-  border:2px solid #fff;
-}
-.wpe-waypoint {
-  width:20px; height:20px; background:#00e5ff; color:#0f1d3a;
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  border:2px solid #fff;
-}
-.wpe-start { box-shadow: 0 0 0 4px rgba(0,230,118,0.4); }
-.wpe-end   { box-shadow: 0 0 0 4px rgba(255,95,21,0.4); }
-
-.wpe-collapsed { width: 32px !important; }
-.wpe-collapsed .wpe-head strong, .wpe-collapsed .wpe-tabs,
-.wpe-collapsed .wpe-totals, .wpe-collapsed .wpe-list, .wpe-collapsed .wpe-empty { display:none; }
+/* Waypoint editor widget, marker styling, and the collapse/excluded rules
+ * live in src/css/waypoint-editor.css — shared with the Analysis Edit panel.
+ */

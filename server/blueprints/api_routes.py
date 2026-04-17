@@ -131,6 +131,10 @@ def get_single_route(route_id):
     route = get_route(user_id, route_id)
     if route is None:
         return jsonify({"error": "Not found"}), 404
+    # has_recipe is true iff route_waypoints has at least one row — drives
+    # the Edit button's enabled/disabled state on the Analysis page.
+    from server.models import waypoints as wp_model
+    route["has_recipe"] = bool(wp_model.list_waypoints(route_id))
     return jsonify(route), 200
 
 

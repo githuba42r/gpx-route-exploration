@@ -20,7 +20,11 @@ def analysis(route_id):
     if not route:
         return redirect(url_for("pages.library"))
     touch_last_accessed(user_id, route_id)
-    return render_template("analysis.html", route=route)
+    # Edit button is only enabled when this route has a recipe (i.e. at
+    # least one row in route_waypoints) — M2 can't edit pure-GPX uploads.
+    from server.models import waypoints as wp_model
+    has_recipe = bool(wp_model.list_waypoints(route_id))
+    return render_template("analysis.html", route=route, has_recipe=has_recipe)
 
 
 @bp.route("/create")

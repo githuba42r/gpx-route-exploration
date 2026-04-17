@@ -3,10 +3,14 @@
 {% block css %}
 <link rel="stylesheet" href="/static/dist/analysis.min.css">
 {% endblock %}
-{% block body_attrs %}data-gpx-file="/api/gpx/{{ route.id }}" data-route-id="{{ route.id }}"{% endblock %}
+{% block body_attrs %}data-gpx-file="/api/gpx/{{ route.id }}" data-route-id="{{ route.id }}" data-has-recipe="{{ 'true' if has_recipe else 'false' }}"{% endblock %}
 {% block nav_items %}
 <a href="/">&larr; Library</a>
 <span class="nav-route-title">{{ route.title }}</span>
+<button id="btn-open-edit" type="button"
+        {% if not has_recipe %}disabled title="This route has no recipe — 'Convert to recipe' ships in M6"{% else %}title="Edit stops and waypoints"{% endif %}>
+  Edit Route
+</button>
 {% endblock %}
 {% block content %}
 <div id="header">
@@ -69,7 +73,39 @@
   </div>
 </div>
 
-<!-- Context menu -->
+<!-- M2: Edit panel + pin context menu + stop-edit modal (reuses the CSS and
+     IDs from the Create page). Only mounted/opened when has_recipe. -->
+<div id="edit-panel-overlay" style="display:none;">
+  <aside id="edit-panel">
+    <div id="edit-panel-head">
+      <strong>Edit route</strong>
+      <button id="btn-close-edit" type="button" title="Close">&times;</button>
+    </div>
+    <div id="edit-panel-editor"></div>
+    <div id="edit-panel-foot">
+      <span id="edit-panel-status" class="ep-status-idle">No changes</span>
+      <button id="btn-regen-edit" type="button">Regenerate Route</button>
+    </div>
+  </aside>
+</div>
+<div id="pin-ctx-menu" role="menu" style="display:none;"></div>
+<div id="stop-edit-overlay" style="display:none;">
+  <div id="stop-edit-modal" role="dialog" aria-modal="true">
+    <h3>Edit stop</h3>
+    <label for="stop-edit-name">Name</label>
+    <input type="text" id="stop-edit-name" maxlength="120">
+    <label for="stop-edit-description">Description</label>
+    <textarea id="stop-edit-description" rows="3"></textarea>
+    <label for="stop-edit-arrival">Scheduled arrival <span style="color:#6a7a9a;">(optional)</span></label>
+    <input type="datetime-local" id="stop-edit-arrival">
+    <div class="stop-edit-actions">
+      <button id="stop-edit-cancel" type="button">Cancel</button>
+      <button id="stop-edit-save" type="button" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Existing (pre-M2) analysis context menu -->
 <div id="ctx-menu">
   <div class="ctx-item" id="ctx-add-waypoint">&#128204; Add Waypoint</div>
   <div class="ctx-item" id="ctx-grad-info">&#128200; Route Gradient</div>

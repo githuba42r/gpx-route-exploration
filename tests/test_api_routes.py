@@ -137,3 +137,20 @@ def test_create_recipe_only_route(client):
     rid = body["id"]
     got = client.get(f"/api/routes/{rid}").get_json()
     assert "id" in got
+
+
+def test_get_route_includes_has_recipe(client):
+    r = client.post(
+        "/api/routes",
+        json={"title": "Recipe"},
+        content_type="application/json",
+    )
+    rid = r.get_json()["id"]
+    got = client.get(f"/api/routes/{rid}").get_json()
+    assert got["has_recipe"] is False
+    client.post(
+        f"/api/routes/{rid}/waypoints",
+        json={"name": "A", "lat": 0, "lon": 0, "kind": "stop"},
+    )
+    got = client.get(f"/api/routes/{rid}").get_json()
+    assert got["has_recipe"] is True
