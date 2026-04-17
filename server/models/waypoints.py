@@ -56,7 +56,10 @@ def update_waypoint(waypoint_id, route_id, **fields):
     via reorder_waypoints."""
     allowed = {"name", "address", "kind", "lat", "lon",
                "included", "pin_role", "dwell_minutes", "description"}
-    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    # Fields in NULLABLE may be set to NULL explicitly (e.g. clearing pin_role).
+    NULLABLE = {"pin_role", "address", "description"}
+    updates = {k: v for k, v in fields.items()
+               if k in allowed and (v is not None or k in NULLABLE)}
     if not updates:
         return get_waypoint(waypoint_id, route_id)
     set_clause = ", ".join(f"{k} = ?" for k in updates)
