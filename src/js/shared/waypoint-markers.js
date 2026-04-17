@@ -3,13 +3,13 @@
 // Icons are HTML divIcons styled with CSS. Stop = red octagon,
 // waypoint = cyan diamond. Number inside is the 1-based visit order.
 
-function stopIconHtml(n, { isStart = false, isEnd = false } = {}) {
-  const cls = `wpe-marker wpe-stop${isStart ? ' wpe-start' : ''}${isEnd ? ' wpe-end' : ''}`;
+function stopIconHtml(n, { isStart = false, isEnd = false, dimmed = false } = {}) {
+  const cls = `wpe-marker wpe-stop${isStart ? ' wpe-start' : ''}${isEnd ? ' wpe-end' : ''}${dimmed ? ' wpe-dimmed' : ''}`;
   return `<div class="${cls}">${n}</div>`;
 }
 
-function waypointIconHtml(n) {
-  return `<div class="wpe-marker wpe-waypoint"><span>${n}</span></div>`;
+function waypointIconHtml(n, { dimmed = false } = {}) {
+  return `<div class="wpe-marker wpe-waypoint${dimmed ? ' wpe-dimmed' : ''}"><span>${n}</span></div>`;
 }
 
 export function makeStopMarker(lat, lon, n, opts = {}) {
@@ -25,7 +25,7 @@ export function makeStopMarker(lat, lon, n, opts = {}) {
 export function makeWaypointMarker(lat, lon, n, opts = {}) {
   const icon = L.divIcon({
     className: '',
-    html: waypointIconHtml(n),
+    html: waypointIconHtml(n, opts),
     iconSize: [20, 20],
     iconAnchor: [10, 10],
   });
@@ -53,6 +53,7 @@ export function renderMarkers(map, waypoints, existingLayers,
     const marker = make(w.lat, w.lon, n, {
       isStart: w.pin_role === 'start',
       isEnd: w.pin_role === 'end',
+      dimmed: w.included === 0,
       draggable,
     });
     marker.addTo(map);
@@ -61,7 +62,7 @@ export function renderMarkers(map, waypoints, existingLayers,
     if (onContextMenu) {
       marker.on('contextmenu', (e) => {
         if (e.originalEvent) e.originalEvent.preventDefault();
-        onContextMenu(w);
+        onContextMenu(w, e);
       });
     }
     if (onDragEnd) marker.on('dragend', (e) => {

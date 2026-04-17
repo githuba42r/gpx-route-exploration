@@ -55,9 +55,10 @@ def update_waypoint(waypoint_id, route_id, **fields):
     pin_role, dwell_minutes, description. Position is handled separately
     via reorder_waypoints."""
     allowed = {"name", "address", "kind", "lat", "lon",
-               "included", "pin_role", "dwell_minutes", "description"}
+               "included", "pin_role", "dwell_minutes", "description",
+               "arrival_time"}
     # Fields in NULLABLE may be set to NULL explicitly (e.g. clearing pin_role).
-    NULLABLE = {"pin_role", "address", "description"}
+    NULLABLE = {"pin_role", "address", "description", "arrival_time"}
     updates = {k: v for k, v in fields.items()
                if k in allowed and (v is not None or k in NULLABLE)}
     if not updates:

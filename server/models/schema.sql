@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS route_waypoints (
     pin_role        TEXT    CHECK(pin_role IN ('start', 'end') OR pin_role IS NULL),
     dwell_minutes   INTEGER NOT NULL DEFAULT 0,
     description     TEXT,
+    arrival_time    TEXT,           -- ISO 8601 string; optional per-stop arrival target
     UNIQUE(route_id, position)
 );
 CREATE INDEX IF NOT EXISTS idx_waypoints_route ON route_waypoints(route_id);

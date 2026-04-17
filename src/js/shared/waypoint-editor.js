@@ -109,7 +109,7 @@ export function mountWaypointEditor(container, handlers = {}) {
       const actualIdx = state.waypoints.indexOf(w);
       const visitN = actualIdx + 1;
       const li = document.createElement('li');
-      li.className = `wpe-item wpe-item-${w.kind}`;
+      li.className = `wpe-item wpe-item-${w.kind}${w.included === 0 ? ' wpe-excluded' : ''}`;
       li.dataset.wptId = w.id;
       li.innerHTML = `
         <span class="wpe-handle" title="Drag to reorder">⋮⋮</span>

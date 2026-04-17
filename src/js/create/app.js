@@ -156,6 +156,142 @@ function applyColors(state) {
   if (state.generatedLayer) state.generatedLayer.setStyle({ color: state.routeColor });
 }
 
+// -------------------- pin context menu --------------------
+//
+// Right-click on a map marker opens this. Items are built on the fly from
+// the waypoint's current state (kind, included). Delete uses a two-step
+// inline confirmation so the menu stays out of modal territory.
+
+let ctxDeleteArmed = null;  // waypoint id that has been armed for deletion
+
+function closePinContextMenu() {
+  const menu = document.getElementById('pin-ctx-menu');
+  menu.style.display = 'none';
+  menu.innerHTML = '';
+  ctxDeleteArmed = null;
+}
+
+function openPinContextMenu(state, editor, w, leafletEvt) {
+  const menu = document.getElementById('pin-ctx-menu');
+  const isStop = w.kind === 'stop';
+  const included = w.included !== 0;
+
+  menu.innerHTML = `
+    <div class="ctx-header">${escapeHtml(w.name || (isStop ? 'Stop' : 'Waypoint'))}</div>
+    <button data-act="toggle-kind" type="button">${isStop ? 'Mark as Waypoint' : 'Mark as Stop'}</button>
+    <button data-act="toggle-include" type="button">${included ? 'Exclude from route' : 'Include in route'}</button>
+    ${isStop ? '<button data-act="edit-stop" type="button">Edit stop details…</button>' : ''}
+    <div class="ctx-sep"></div>
+    <button data-act="delete" type="button" class="danger">Delete</button>
+  `;
+
+  // Position at the cursor.
+  const ev = leafletEvt?.originalEvent;
+  if (ev) {
+    menu.style.left = ev.clientX + 'px';
+    menu.style.top = ev.clientY + 'px';
+  }
+  menu.style.display = 'block';
+
+  menu.querySelectorAll('button[data-act]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.act;
+
+      if (act === 'delete') {
+        if (ctxDeleteArmed !== w.id) {
+          ctxDeleteArmed = w.id;
+          btn.textContent = 'Click again to confirm delete';
+          btn.classList.add('confirm-danger');
+          return;
+        }
+        closePinContextMenu();
+        await api.deleteWaypoint(state.routeId, w.id);
+        await onWaypointsChanged(state, editor);
+        return;
+      }
+
+      closePinContextMenu();
+      if (act === 'toggle-kind') {
+        const nextKind = isStop ? 'waypoint' : 'stop';
+        await api.patchWaypoint(state.routeId, w.id, { kind: nextKind });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'toggle-include') {
+        await api.patchWaypoint(state.routeId, w.id, { included: included ? 0 : 1 });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'edit-stop') {
+        openStopEditModal(state, editor, w);
+      }
+    });
+  });
+}
+
+// Click anywhere outside the menu dismisses it.
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('pin-ctx-menu');
+  if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) {
+    closePinContextMenu();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closePinContextMenu();
+});
+
+// -------------------- stop edit modal --------------------
+
+function openStopEditModal(state, editor, w) {
+  const overlay = document.getElementById('stop-edit-overlay');
+  const nameInput = document.getElementById('stop-edit-name');
+  const descInput = document.getElementById('stop-edit-description');
+  const arrivalInput = document.getElementById('stop-edit-arrival');
+  const saveBtn = document.getElementById('stop-edit-save');
+  const cancelBtn = document.getElementById('stop-edit-cancel');
+
+  nameInput.value = w.name || '';
+  descInput.value = w.description || '';
+  arrivalInput.value = isoToLocalInput(w.arrival_time);
+  overlay.style.display = 'flex';
+  nameInput.focus();
+  nameInput.select();
+
+  // Replace listeners (cleanest way when re-opened for a different stop).
+  const save = async () => {
+    const arrival = arrivalInput.value
+      ? new Date(arrivalInput.value).toISOString()
+      : null;
+    await api.patchWaypoint(state.routeId, w.id, {
+      name: nameInput.value.trim() || 'Stop',
+      description: descInput.value.trim() || null,
+      arrival_time: arrival,
+    });
+    overlay.style.display = 'none';
+    cleanup();
+    await onWaypointsChanged(state, editor);
+  };
+  const cancel = () => { overlay.style.display = 'none'; cleanup(); };
+  const keyHandler = (e) => {
+    if (e.key === 'Escape') cancel();
+    else if (e.key === 'Enter' && !e.shiftKey && e.target.tagName !== 'TEXTAREA') save();
+  };
+  function cleanup() {
+    saveBtn.removeEventListener('click', save);
+    cancelBtn.removeEventListener('click', cancel);
+    overlay.removeEventListener('keydown', keyHandler);
+  }
+  saveBtn.addEventListener('click', save);
+  cancelBtn.addEventListener('click', cancel);
+  overlay.addEventListener('keydown', keyHandler);
+}
+
+function isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  // datetime-local expects YYYY-MM-DDTHH:mm in local time.
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // -------------------- initial page-load draw --------------------
 //
 // On page reload there may already be a set of waypoints AND a previously-
@@ -199,10 +335,8 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
         await api.patchWaypoint(state.routeId, w.id, { lat: snap.lat, lon: snap.lon });
         await onWaypointsChanged(state, editor);
       },
-      onContextMenu: async (w) => {
-        const nextKind = w.kind === 'stop' ? 'waypoint' : 'stop';
-        await api.patchWaypoint(state.routeId, w.id, { kind: nextKind });
-        await onWaypointsChanged(state, editor);
+      onContextMenu: (w, evt) => {
+        openPinContextMenu(state, editor, w, evt);
       },
     },
   );
@@ -740,9 +874,15 @@ async function main() {
   state.clickCounter = state.waypoints.length;
   state.map.on('click', async (e) => {
     const n = ++state.clickCounter;
+    // Ctrl+click (or Cmd+click on macOS) drops a stop, plain click drops a
+    // waypoint. Keeps single-click fast for route shaping and makes the
+    // destinations-intent explicit without a separate tool.
+    const asStop = !!(e.originalEvent && (e.originalEvent.ctrlKey || e.originalEvent.metaKey));
+    const kind = asStop ? 'stop' : 'waypoint';
     const snap = await maybeSnapToRoad(e.latlng.lat, e.latlng.lng);
     await api.appendWaypoint(state.routeId, {
-      name: `Waypoint ${n}`, lat: snap.lat, lon: snap.lon, kind: 'waypoint',
+      name: asStop ? `Stop ${n}` : `Waypoint ${n}`,
+      lat: snap.lat, lon: snap.lon, kind,
     });
     await onWaypointsChanged(state, editor);
   });

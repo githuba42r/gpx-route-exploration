@@ -10,7 +10,7 @@
 {% block content %}
 <div id="create-header">
   <input id="route-title" type="text" placeholder="Route title…" value="Untitled Route">
-  <span id="create-hint">Click the map to drop a waypoint. Right-click a pin to mark as stop. Dashed line = preview — click <em>Generate Route</em> to snap to roads.</span>
+  <span id="create-hint">Click = drop waypoint · Ctrl+click = drop stop · right-click a pin for more · dashed line = preview.</span>
   <div style="flex:1;"></div>
   <select id="route-profile" disabled title="Profile selection ships in M3">
     <option value="bicycle">Bike</option>
@@ -46,6 +46,26 @@
 <div id="create-main">
   <div id="map" style="position:relative;"></div>
   <aside id="editor-panel"></aside>
+</div>
+
+<!-- Right-click context menu on a pin. Content built dynamically. -->
+<div id="pin-ctx-menu" role="menu" style="display:none;"></div>
+
+<!-- Edit-stop modal: name, description, arrival datetime. -->
+<div id="stop-edit-overlay" style="display:none;">
+  <div id="stop-edit-modal" role="dialog" aria-modal="true">
+    <h3>Edit stop</h3>
+    <label for="stop-edit-name">Name</label>
+    <input type="text" id="stop-edit-name" maxlength="120">
+    <label for="stop-edit-description">Description</label>
+    <textarea id="stop-edit-description" rows="3" placeholder="Notes, reason for stopping, etc."></textarea>
+    <label for="stop-edit-arrival">Scheduled arrival <span style="color:#6a7a9a;">(optional)</span></label>
+    <input type="datetime-local" id="stop-edit-arrival">
+    <div class="stop-edit-actions">
+      <button id="stop-edit-cancel" type="button">Cancel</button>
+      <button id="stop-edit-save" type="button" class="primary">Save</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}

@@ -52,15 +52,104 @@ def test_add_three_waypoints_and_remove_one(page, server_url):
     )
 
 
-def test_marker_right_click_toggles_kind(page, server_url):
-    page.set_viewport_size({"width": 1280, "height": 1000})
-    page.goto(f"{server_url}/create")
-    page.wait_for_function(
-        "() => new URL(location.href).searchParams.get('route_id') !== null")
+def test_ctrl_click_drops_stop(page, server_url):
+    """Ctrl+click on the map drops a stop (kind=stop) instead of a waypoint."""
+    _goto_create_fresh(page, server_url)
+    box = page.locator("#map").bounding_box()
+    x = box["x"] + 0.5 * box["width"]
+    y = box["y"] + 0.5 * box["height"]
+    page.keyboard.down("Control")
+    page.mouse.click(x, y)
+    page.keyboard.up("Control")
+    expect(page.locator(".wpe-item-stop").first).to_be_visible(timeout=3000)
+    expect(page.locator(".wpe-item-waypoint")).to_have_count(0)
+
+
+def test_right_click_opens_pin_context_menu(page, server_url):
+    """Right-click on a map pin opens the context menu with the expected
+    actions (Mark as Stop, Exclude, Delete)."""
+    _goto_create_fresh(page, server_url)
     _click_map_at(page, "#map", 0.3, 0.4)
     page.wait_for_selector(".wpe-item-waypoint", timeout=3000)
     page.locator(".wpe-marker.wpe-waypoint").first.click(button="right")
+    menu = page.locator("#pin-ctx-menu")
+    expect(menu).to_be_visible()
+    expect(menu.locator("button[data-act='toggle-kind']")).to_have_text("Mark as Stop")
+    expect(menu.locator("button[data-act='toggle-include']")).to_have_text("Exclude from route")
+    expect(menu.locator("button[data-act='delete']")).to_be_visible()
+    # Waypoints don't carry Edit stop details.
+    expect(menu.locator("button[data-act='edit-stop']")).to_have_count(0)
+
+
+def test_context_menu_toggle_kind_updates_sidebar(page, server_url):
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item-waypoint", timeout=3000)
+    page.locator(".wpe-marker.wpe-waypoint").first.click(button="right")
+    page.locator("#pin-ctx-menu button[data-act='toggle-kind']").click()
+    expect(page.locator(".wpe-item-stop").first).to_be_visible(timeout=3000)
+
+
+def test_context_menu_exclude_greys_marker_and_row(page, server_url):
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+    page.locator(".wpe-marker").first.click(button="right")
+    page.locator("#pin-ctx-menu button[data-act='toggle-include']").click()
+    expect(page.locator(".wpe-item.wpe-excluded").first).to_be_visible(timeout=3000)
+    expect(page.locator(".wpe-marker.wpe-dimmed").first).to_be_visible()
+
+
+def test_context_menu_delete_requires_confirmation(page, server_url):
+    """Delete takes two clicks — first arms, second actually deletes."""
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+    page.locator(".wpe-marker").first.click(button="right")
+    del_btn = page.locator("#pin-ctx-menu button[data-act='delete']")
+    expect(del_btn).to_have_text("Delete")
+    del_btn.click()
+    expect(del_btn).to_have_text("Click again to confirm delete")
+    expect(page.locator(".wpe-item")).to_have_count(1)
+    del_btn.click()
+    expect(page.locator(".wpe-item")).to_have_count(0, timeout=3000)
+
+
+def test_stop_context_menu_offers_edit_details(page, server_url):
+    """Stops get an Edit stop details… menu item that opens the modal
+    and persists name / description / arrival_time on save."""
+    _goto_create_fresh(page, server_url)
+    box = page.locator("#map").bounding_box()
+    x = box["x"] + 0.5 * box["width"]
+    y = box["y"] + 0.5 * box["height"]
+    page.keyboard.down("Control"); page.mouse.click(x, y); page.keyboard.up("Control")
     page.wait_for_selector(".wpe-item-stop", timeout=3000)
+
+    page.locator(".wpe-marker.wpe-stop").first.click(button="right")
+    page.locator("#pin-ctx-menu button[data-act='edit-stop']").click()
+    overlay = page.locator("#stop-edit-overlay")
+    expect(overlay).to_be_visible()
+    page.locator("#stop-edit-name").fill("Samford Café")
+    page.locator("#stop-edit-description").fill("Coffee + banana bread")
+    page.locator("#stop-edit-arrival").fill("2026-05-01T09:30")
+    page.locator("#stop-edit-save").click()
+    expect(overlay).to_be_hidden(timeout=3000)
+
+    wpt = page.evaluate("""async () => {
+      const rid = new URL(location.href).searchParams.get('route_id');
+      const r = await fetch(`/api/routes/${rid}/waypoints`);
+      return (await r.json())[0];
+    }""")
+    assert wpt["name"] == "Samford Café"
+    assert wpt["description"] == "Coffee + banana bread"
+    # Stored as ISO 8601 — don't check the exact string (TZ-sensitive).
+    # Instead verify the round-trip: reopen the modal and check the
+    # datetime-local input renders the same 2026-05-01 09:30.
+    assert wpt["arrival_time"], "arrival_time not persisted"
+    page.locator(".wpe-marker.wpe-stop").first.click(button="right")
+    page.locator("#pin-ctx-menu button[data-act='edit-stop']").click()
+    expect(page.locator("#stop-edit-arrival")).to_have_value("2026-05-01T09:30")
+    page.locator("#stop-edit-cancel").click()
 
 
 def test_drag_reorder_waypoints(page, server_url):

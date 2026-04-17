@@ -92,6 +92,66 @@
 }
 #gen-menu .menu-reset:hover { color:#e6edf5; background:#0f3460; }
 
+/* --- Pin context menu (right-click on a map marker) --- */
+#pin-ctx-menu {
+  position:fixed; z-index:1400;
+  background:#0f1d3a; border:1px solid #0f3460; border-radius:6px;
+  padding:4px 0; min-width:200px; box-shadow:0 6px 20px rgba(0,0,0,0.5);
+  font-size:0.85em;
+}
+#pin-ctx-menu .ctx-header {
+  padding:6px 12px 8px; border-bottom:1px solid #0f3460;
+  color:#a0a0b0; font-size:0.75em; text-transform:uppercase; letter-spacing:0.5px;
+}
+#pin-ctx-menu button {
+  display:block; width:100%; text-align:left;
+  background:transparent; border:none; color:#e6edf5;
+  padding:7px 12px; cursor:pointer; font-size:0.9em;
+}
+#pin-ctx-menu button:hover { background:#0f3460; }
+#pin-ctx-menu button.danger       { color:#ff8896; }
+#pin-ctx-menu button.danger:hover { background:rgba(255,71,87,0.2); color:#fff; }
+#pin-ctx-menu button.confirm-danger { background:#ff4757; color:#fff; }
+#pin-ctx-menu .ctx-sep {
+  height:1px; background:#0f3460; margin:4px 0;
+}
+
+/* --- Excluded waypoints (dimmed in sidebar + desaturated marker) --- */
+.wpe-item.wpe-excluded { opacity:0.45; text-decoration:line-through; }
+.wpe-marker.wpe-dimmed { opacity:0.35; filter:grayscale(0.7); }
+
+/* --- Stop edit modal --- */
+#stop-edit-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1500;
+  display:flex; align-items:center; justify-content:center;
+}
+#stop-edit-modal {
+  background:#0f1d3a; border:1px solid #0f3460; border-radius:8px;
+  padding:20px 24px; min-width:380px; max-width:90vw;
+  box-shadow:0 10px 40px rgba(0,0,0,0.6);
+}
+#stop-edit-modal h3 { margin:0 0 12px 0; font-size:1.1em; color:#e6edf5; }
+#stop-edit-modal label {
+  display:block; color:#a0a0b0; font-size:0.78em; text-transform:uppercase;
+  letter-spacing:0.5px; margin:10px 0 4px;
+}
+#stop-edit-modal input,
+#stop-edit-modal textarea {
+  width:100%; box-sizing:border-box;
+  background:#0a152b; border:1px solid #0f3460; color:#e6edf5;
+  padding:8px 10px; border-radius:4px; font-size:0.9em; font-family:inherit;
+}
+#stop-edit-modal textarea { resize:vertical; min-height:60px; }
+.stop-edit-actions {
+  display:flex; gap:8px; justify-content:flex-end; margin-top:16px;
+}
+.stop-edit-actions button {
+  background:#0f3460; color:#e6edf5; border:1px solid #2b3650;
+  padding:7px 14px; border-radius:4px; cursor:pointer; font-size:0.85em;
+}
+.stop-edit-actions button.primary { background:#e94560; border-color:#e94560; }
+.stop-edit-actions button:hover { filter:brightness(1.1); }
+
 /* Status chip (secondary indicator) */
 #generate-status {
   font-size:0.75em; margin-left:6px; padding:3px 8px; border-radius:3px;
