@@ -47,3 +47,43 @@ CREATE TABLE IF NOT EXISTS category_tags (
     tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
     PRIMARY KEY (category_id, tag_id)
 );
+
+CREATE TABLE IF NOT EXISTS route_waypoints (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id        INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+    position        INTEGER NOT NULL,
+    kind            TEXT    NOT NULL CHECK(kind IN ('stop', 'waypoint')),
+    name            TEXT    NOT NULL,
+    address         TEXT,
+    lat             REAL,
+    lon             REAL,
+    included        INTEGER NOT NULL DEFAULT 1 CHECK(included IN (0, 1)),
+    pin_role        TEXT    CHECK(pin_role IN ('start', 'end') OR pin_role IS NULL),
+    dwell_minutes   INTEGER NOT NULL DEFAULT 0,
+    description     TEXT,
+    UNIQUE(route_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_waypoints_route ON route_waypoints(route_id);
+
+CREATE TABLE IF NOT EXISTS route_options (
+    route_id          INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
+    profile           TEXT    NOT NULL DEFAULT 'bicycle' CHECK(profile IN ('bicycle','pedestrian','auto')),
+    costing_preset    TEXT    NOT NULL DEFAULT 'hybrid' CHECK(costing_preset IN ('road','gravel-mtb','easy','hike','drive','custom','hybrid')),
+    costing_options   TEXT,
+    round_trip        INTEGER NOT NULL DEFAULT 0 CHECK(round_trip IN (0, 1)),
+    max_gradient_warn REAL,
+    last_optimised_at INTEGER,
+    last_generated_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS route_legs (
+    route_id        INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+    from_position   INTEGER NOT NULL,
+    to_position     INTEGER NOT NULL,
+    distance_m      REAL    NOT NULL,
+    duration_s      REAL    NOT NULL,
+    polyline        TEXT    NOT NULL,
+    max_grade_pct   REAL,
+    warnings        TEXT,
+    PRIMARY KEY (route_id, from_position, to_position)
+);
