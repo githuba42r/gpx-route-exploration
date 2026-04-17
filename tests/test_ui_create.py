@@ -277,43 +277,76 @@ def test_auto_on_with_single_waypoint_does_not_start_countdown(page, server_url)
     # Countdown SVG is hidden.
     expect(page.locator("#gen-primary-countdown")).to_be_hidden()
 
-    # Drop a second waypoint — now the timer DOES kick in.
+    # Drop a second waypoint — leading-edge fires right away, so we should
+    # see either 'busy' (request in flight) or 'cooldown' (post-response wait).
     _click_map_at(page, "#map", 0.6, 0.4)
     page.wait_for_function(
-        "() => ['debounce', 'rate'].includes(document.getElementById('generate-control').dataset.variant)",
-        timeout=3000,
+        "() => ['busy', 'cooldown'].includes(document.getElementById('generate-control').dataset.variant)",
+        timeout=5000,
     )
 
 
-def test_adding_waypoint_while_auto_on_shows_pending_countdown(page, server_url):
-    """Auto ON + add a waypoint → variant becomes 'debounce' and the
-    countdown SVG is visible."""
+def test_leading_edge_fires_then_cooldown(page, server_url):
+    """With auto ON, adding the second waypoint should fire /generate
+    immediately (button briefly 'busy') and the cooldown timer should start
+    AFTER the generate completes (not before). We verify that the variant
+    progresses through either 'busy' → 'cooldown' or straight to 'cooldown'
+    depending on how fast the backend responds."""
     _goto_create_fresh(page, server_url)
+    # Enable auto BEFORE dropping pins, so the second pin is the trigger.
+    page.locator("#btn-gen-dropdown").click()
+    page.locator("#menu-enable-auto").click()
+    # Drop the first pin — auto should NOT fire (< 2 waypoints).
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 1",
+        timeout=5000,
+    )
+    expect(page.locator("#generate-control")).to_have_attribute("data-variant", "ready")
+
+    # Drop the second pin — this should fire /generate immediately. The
+    # variant transitions to busy or cooldown. Valhalla may error out on
+    # map-grid coords, but the cooldown starts regardless — that's the
+    # critical contract the test guards.
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => ['busy', 'cooldown'].includes(document.getElementById('generate-control').dataset.variant)",
+        timeout=5000,
+    )
+    # Within the cooldown, the countdown SVG is visible.
+    page.wait_for_function(
+        "() => document.getElementById('generate-control').dataset.variant === 'cooldown'",
+        timeout=10000,
+    )
+    expect(page.locator("#gen-primary-countdown")).to_be_visible()
+
+
+def test_pin_offroad_triggers_actionable_guidance(page, server_url):
+    """A Valhalla 499 error surfaces guidance text in the error panel, not
+    just the raw upstream body."""
+    _goto_create_fresh(page, server_url)
+    # Drop two pins in the middle of the default Brisbane map view — likely
+    # cycleable roads, but the point of the test is the error rendering path.
+    # Inject a fake /generate error via a route handler so the test is
+    # deterministic regardless of the real Valhalla.
+    page.route("**/api/routes/*/generate", lambda route: route.fulfill(
+        status=502,
+        content_type="application/json",
+        body='{"error":"Upstream routing service failed","detail":"Valhalla at '
+             'http://test/route returned HTTP 400","upstream_url":'
+             '"http://test/route","upstream_body":"{\\"error_code\\":499,\\"error\\":'
+             '\\"Unknown: Could not find candidate edge used for destination label\\"}"}',
+    ))
     _click_map_at(page, "#map", 0.3, 0.4)
     _click_map_at(page, "#map", 0.6, 0.4)
     page.wait_for_function(
-        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
-
-    # Enable auto first.
-    page.locator("#btn-gen-dropdown").click()
-    page.locator("#menu-enable-auto").click()
-
-    # Set a short debounce (2s) so the debounce state is observable and the
-    # test doesn't hang on the default 5s.
-    page.locator("#btn-gen-dropdown").click()
-    page.locator("#menu-debounce-seconds").fill("2")
-    page.locator("#menu-debounce-seconds").dispatch_event("change")
-    # Close menu by pressing Escape or clicking outside.
-    page.keyboard.press("Escape")
-
-    # Add a third waypoint — this is a change, so debounce timer should kick.
-    _click_map_at(page, "#map", 0.7, 0.4)
-
-    # Variant will be 'debounce' (or 'rate' if rate-limit is in effect). Both
-    # show the countdown.
-    page.wait_for_function(
-        "() => ['debounce', 'rate'].includes(document.getElementById('generate-control').dataset.variant)",
-        timeout=3000,
+        "() => document.querySelectorAll('.wpe-item').length === 2",
+        timeout=5000,
     )
-    # The SVG countdown element is inline-block while pending.
-    expect(page.locator("#gen-primary-countdown")).to_be_visible()
+    # Trigger manual generate.
+    page.locator("#btn-gen-primary").click()
+    # Error panel should appear with a guidance line explaining snapping.
+    expect(page.locator("#generate-error .err-guidance")).to_be_visible(timeout=5000)
+    expect(page.locator("#generate-error .err-guidance")).to_contain_text("snap")
+    # Raw upstream body still shown below the guidance.
+    expect(page.locator("#generate-error .err-upstream")).to_contain_text("error_code")

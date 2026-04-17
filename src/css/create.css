@@ -100,6 +100,11 @@
 }
 #generate-error strong { color:#ff4757; }
 #generate-error .err-source { color:#a0a0b0; font-size:0.9em; }
+#generate-error .err-guidance {
+  display:block; margin-top:6px; padding:8px 10px;
+  background:rgba(255,159,67,0.08); border-left:3px solid #ff9f43;
+  color:#ffd49a; font-size:0.85em; line-height:1.5;
+}
 #generate-error .err-upstream {
   display:block; margin-top:6px; padding:6px 10px; background:#0a152b;
   border-left:3px solid #ff4757; font-family: ui-monospace, monospace;

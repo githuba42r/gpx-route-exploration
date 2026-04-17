@@ -19,9 +19,13 @@ import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
 
-// Global rate limit: minimum ms between successful /generate calls regardless
-// of trigger (auto debounce or manual click).
-const GLOBAL_RATE_LIMIT_MS = 5000;
+// Leading-edge debounce semantics:
+//   - A waypoint change fires /generate IMMEDIATELY (if eligible).
+//   - After a generate completes, a cooldown of `debounceMs` runs.
+//   - Waypoint changes during that cooldown are remembered (pendingChange)
+//     and fire exactly once when the cooldown ends.
+//   - Debounce slider sets the cooldown duration; no separate global
+//     rate limit anymore (debounceMs IS the rate limit).
 
 const STORAGE_AUTO = 'gpx-create-auto-generate';
 const STORAGE_DEBOUNCE = 'gpx-create-debounce-ms';
@@ -108,16 +112,16 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
 
 async function onWaypointsChanged(state, editor) {
   await reloadWaypoints(state, editor);
-  // Guard auto-generation to routes with at least two waypoints — Valhalla
-  // needs that many, and firing a debounce timer for a single-point route
-  // just leads to a user-visible countdown that then errors out.
   if (state.autoGenerate && state.waypoints.length >= 2) {
-    scheduleGenerate(state);
+    maybeFireGenerate(state);   // fires immediately if eligible; queues otherwise
     ensureRenderLoop(state);
-  } else if (state.pendingTimer) {
-    // Dropped below the threshold while a timer was running — cancel it.
-    cancelPending(state);
-    setStatus('Idle', 'idle');
+  } else if (state.waypoints.length < 2) {
+    // Dropped below threshold — cancel any cooldown so the button returns to
+    // idle state; also clear the pending flag so nothing fires later.
+    cancelCooldownTimer(state);
+    state.cooldownStartedAt = null;
+    state.cooldownDeadline = null;
+    state.pendingChange = false;
   }
   renderGenerateControl(state);
 }
@@ -132,14 +136,33 @@ function setStatus(text, cls = 'idle') {
 
 function clearError() { document.getElementById('generate-error').style.display = 'none'; }
 
+// Translate known Valhalla errors into actionable guidance. Leave unknown
+// errors alone — the upstream body is still shown so we don't hide info.
+function guidanceForValhallaBody(body) {
+  if (!body) return null;
+  if (body.includes('"error_code":499') || body.includes('Could not find candidate edge')) {
+    return 'Valhalla couldn\'t snap one of your pins to its road network. This usually means the pin is off-road (e.g. in a park without tagged trails, in water, or too far from any cycleable road). Try dragging the affected pin closer to a road and regenerating.';
+  }
+  if (body.includes('"error_code":171') || body.includes('No suitable edges near location')) {
+    return 'Valhalla couldn\'t find any cycleable road near one of your pins. Move the pin closer to a road.';
+  }
+  if (body.includes('"error_code":170') || body.includes('No path could be found')) {
+    return 'Valhalla found edges near each pin but couldn\'t build a connected path — the route may be blocked by a disconnected network segment or water crossing. Try adding an intermediate waypoint to steer through a passable area.';
+  }
+  return null;
+}
+
 function showError(err) {
   const el = document.getElementById('generate-error');
+  const guidance = guidanceForValhallaBody(err.upstreamBody);
+  const guidanceHtml = guidance ? `<div class="err-guidance">${escapeHtml(guidance)}</div>` : '';
   const upstream = err.upstreamUrl ? `<div class="err-upstream">Upstream: ${escapeHtml(err.upstreamUrl)}${err.upstreamBody ? `\n\n${escapeHtml(err.upstreamBody)}` : ''}</div>` : '';
-  const detail = err.detail ? `<div class="err-upstream">${escapeHtml(err.detail)}</div>` : '';
+  const detail = err.detail && !err.upstreamUrl ? `<div class="err-upstream">${escapeHtml(err.detail)}</div>` : '';
   el.innerHTML = `
     <button class="err-dismiss" type="button" title="Dismiss">&times;</button>
     <strong>Route generation failed.</strong>
     <span class="err-source">(backend endpoint ${escapeHtml(err.endpoint || '/api/routes/?/generate')} returned ${err.status ?? '—'})</span>
+    ${guidanceHtml}
     ${upstream || detail}
   `;
   el.querySelector('.err-dismiss').addEventListener('click', clearError);
@@ -151,61 +174,62 @@ function escapeHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function scheduleGenerate(state) {
-  if (state.pendingTimer) clearTimeout(state.pendingTimer);
-  const delay = Math.max(0, state.debounceMs);
-  state.pendingStartedAt = Date.now();
-  state.pendingDeadline = state.pendingStartedAt + delay;
-  setStatus(`Pending (${(delay / 1000).toFixed(1)}s)`, 'pending');
-  state.pendingTimer = setTimeout(() => {
-    state.pendingTimer = null;
-    state.pendingStartedAt = null;
-    state.pendingDeadline = null;
-    tryGenerate(state);
-  }, delay);
+// maybeFireGenerate is the single entry point from auto mode and manual clicks.
+// It decides immediately whether to fire, defer until cooldown ends, or
+// enqueue for the next eligible moment.
+function maybeFireGenerate(state, { bypassCooldown = false } = {}) {
+  if (state.waypoints.length < 2) return;
+  if (state.isGenerating) {
+    state.pendingChange = true;   // picked up after the in-flight call lands
+    return;
+  }
+  if (!bypassCooldown && inCooldown(state)) {
+    state.pendingChange = true;   // picked up when the cooldown timer fires
+    return;
+  }
+  state.pendingChange = false;
+  // Cancel any scheduled cooldown-end callback — doGenerate will start a
+  // fresh cooldown on completion.
+  cancelCooldownTimer(state);
+  doGenerate(state);
+}
+
+function inCooldown(state) {
+  return state.cooldownDeadline != null && state.cooldownDeadline > Date.now();
+}
+
+function cancelCooldownTimer(state) {
+  if (state.cooldownTimer) {
+    clearTimeout(state.cooldownTimer);
+    state.cooldownTimer = null;
+  }
+}
+
+function startCooldown(state) {
+  cancelCooldownTimer(state);
+  const now = Date.now();
+  state.cooldownStartedAt = now;
+  state.cooldownDeadline = now + state.debounceMs;
+  state.cooldownTimer = setTimeout(() => {
+    state.cooldownTimer = null;
+    state.cooldownStartedAt = null;
+    state.cooldownDeadline = null;
+    // If a waypoint edit happened while we were cooling down, fire now.
+    if (state.pendingChange && state.autoGenerate && state.waypoints.length >= 2) {
+      state.pendingChange = false;
+      doGenerate(state);
+    } else {
+      renderGenerateControl(state);
+    }
+  }, state.debounceMs);
+  ensureRenderLoop(state);
   renderGenerateControl(state);
 }
 
-function cancelPending(state) {
-  if (state.pendingTimer) {
-    clearTimeout(state.pendingTimer);
-    state.pendingTimer = null;
-    state.pendingStartedAt = null;
-    state.pendingDeadline = null;
-  }
-}
-
-async function tryGenerate(state) {
-  if (state.isGenerating) {
-    // Someone's mid-flight. Reschedule a small nudge ahead.
-    state.pendingStartedAt = Date.now();
-    state.pendingDeadline = state.pendingStartedAt + 500;
-    state.pendingTimer = setTimeout(() => {
-      state.pendingTimer = null;
-      state.pendingStartedAt = null;
-      state.pendingDeadline = null;
-      tryGenerate(state);
-    }, 500);
-    setStatus('Pending (in-flight)', 'pending');
-    renderGenerateControl(state);
-    return;
-  }
-  const elapsed = Date.now() - state.lastGenerateAt;
-  if (elapsed < GLOBAL_RATE_LIMIT_MS) {
-    const wait = GLOBAL_RATE_LIMIT_MS - elapsed;
-    state.pendingStartedAt = Date.now();
-    state.pendingDeadline = state.pendingStartedAt + wait;
-    setStatus(`Rate-limited (${Math.ceil(wait / 1000)}s)`, 'rate');
-    state.pendingTimer = setTimeout(() => {
-      state.pendingTimer = null;
-      state.pendingStartedAt = null;
-      state.pendingDeadline = null;
-      tryGenerate(state);
-    }, wait);
-    renderGenerateControl(state);
-    return;
-  }
-  await doGenerate(state);
+// tryGenerate is kept as a thin alias used by the "Generate Now" menu action
+// (which bypasses the auto cooldown) and by the primary click in manual mode.
+function tryGenerate(state) {
+  maybeFireGenerate(state, { bypassCooldown: true });
 }
 
 async function doGenerate(state) {
@@ -237,7 +261,6 @@ async function doGenerate(state) {
       return;
     }
     // Success — draw route, update status.
-    state.lastGenerateAt = Date.now();
     state.generatedVersion = version;
     if (version === state.currentVersion) {
       drawGeneratedRoute(state, body.legs || []);
@@ -259,6 +282,13 @@ async function doGenerate(state) {
     setStatus('Network error', 'err');
   } finally {
     state.isGenerating = false;
+    // Start the cooldown regardless of success/failure so we don't hammer
+    // Valhalla with the same broken request while the user is still
+    // editing. If a waypoint change landed during the call, it'll fire
+    // automatically at cooldown end (via the startCooldown timer).
+    if (state.autoGenerate) {
+      startCooldown(state);
+    }
     renderGenerateControl(state);
   }
 }
@@ -284,17 +314,17 @@ function renderGenerateControl(state) {
   const progress = countdownWrap.querySelector('circle.progress');
 
   // The label stays "Generate Now" in every non-busy state; the variant
-  // (and the circular countdown) tells the user what's happening. That way
-  // the button always reads as the positive action the user is thinking of
-  // ("I want the route") and the colour signals the mode.
+  // (and the circular countdown) tells the user what's happening. Colour:
+  //   manual   red    (auto OFF)
+  //   ready    green  (auto ON, no cooldown running, can fire)
+  //   cooldown grey   (auto ON, waiting out the cooldown after a generate)
+  //   busy     red    (generate in flight, disabled)
   let variant, iconText, labelText, disabled = false, showCountdown = false;
 
   if (state.isGenerating) {
     variant = 'busy'; iconText = '⏳'; labelText = 'Generating…'; disabled = true;
-  } else if (state.autoGenerate && state.pendingTimer) {
-    variant = (state.lastGenerateAt && Date.now() - state.lastGenerateAt < GLOBAL_RATE_LIMIT_MS)
-      ? 'rate' : 'debounce';
-    iconText = '';         // countdown SVG takes the icon slot
+  } else if (state.autoGenerate && state.cooldownTimer && inCooldown(state)) {
+    variant = 'cooldown'; iconText = '';
     labelText = 'Generate Now';
     showCountdown = true;
   } else if (state.autoGenerate) {
@@ -310,9 +340,9 @@ function renderGenerateControl(state) {
   countdownWrap.style.display = showCountdown ? 'inline-block' : 'none';
   primary.disabled = disabled;
 
-  if (showCountdown && state.pendingStartedAt != null && state.pendingDeadline != null) {
-    const total = Math.max(1, state.pendingDeadline - state.pendingStartedAt);
-    const remaining = Math.max(0, state.pendingDeadline - Date.now());
+  if (showCountdown && state.cooldownStartedAt != null && state.cooldownDeadline != null) {
+    const total = Math.max(1, state.cooldownDeadline - state.cooldownStartedAt);
+    const remaining = Math.max(0, state.cooldownDeadline - Date.now());
     const progressPct = 1 - remaining / total; // 0→1 as timer runs out
     const CIRCUM = 88;
     progress.style.strokeDashoffset = String(progressPct * CIRCUM);
@@ -320,12 +350,10 @@ function renderGenerateControl(state) {
     progress.style.strokeDashoffset = '0';
   }
 
-  // Title tooltips convey the action that clicking the primary will take.
   primary.title = {
     manual: 'Generate the route now',
-    ready: 'Auto-generate is ON — click to turn it off',
-    debounce: `Auto-generate running (countdown to next call) — click to turn auto off, or pick "Generate Now" from ▾ to skip the wait`,
-    rate: 'Rate-limited — click to turn auto off',
+    ready: 'Auto-generate ON — edits fire immediately. Click to turn auto off.',
+    cooldown: 'Auto-generate ON — cooling down before the next call. Click to turn auto off, or use ▾ → Generate Now to skip the wait.',
     busy: 'Generating…',
   }[variant] || '';
 }
@@ -337,7 +365,7 @@ function startRenderLoop(state) {
   state.renderLoopActive = true;
   const tick = () => {
     renderGenerateControl(state);
-    if (state.pendingTimer || state.isGenerating) {
+    if (state.cooldownTimer || state.isGenerating) {
       state.renderTimer = setTimeout(tick, 150);
     } else {
       state.renderLoopActive = false;
@@ -348,7 +376,7 @@ function startRenderLoop(state) {
 }
 
 function ensureRenderLoop(state) {
-  if ((state.pendingTimer || state.isGenerating) && !state.renderLoopActive) {
+  if ((state.cooldownTimer || state.isGenerating) && !state.renderLoopActive) {
     startRenderLoop(state);
   }
 }
@@ -397,11 +425,11 @@ function buildMenu(state) {
           <input type="range" id="menu-debounce-slider" min="1" max="30" step="1" value="${secs}">
           <input type="number" id="menu-debounce-seconds" min="1" max="30" value="${secs}"> sec
         </div>
-        <div class="menu-hint">Max 1 generate call per ${GLOBAL_RATE_LIMIT_MS / 1000} s globally.</div>
+        <div class="menu-hint">Auto fires immediately on the first eligible change, then waits this long before the next call. Changes during the wait are collapsed into a single call at the end.</div>
       </div>
       <div class="menu-section">
         <button class="menu-btn primary" id="menu-generate-now" type="button">
-          ⚡ Generate Now (skip debounce)
+          ⚡ Generate Now (skip cooldown)
         </button>
       </div>`;
     const slider = menu.querySelector('#menu-debounce-slider');
@@ -416,8 +444,10 @@ function buildMenu(state) {
     slider.addEventListener('input', (e) => setSecs(e.target.value));
     num.addEventListener('change', (e) => setSecs(e.target.value));
     menu.querySelector('#menu-generate-now').addEventListener('click', () => {
-      cancelPending(state);
-      tryGenerate(state);
+      cancelCooldownTimer(state);
+      state.cooldownDeadline = null;
+      state.cooldownStartedAt = null;
+      maybeFireGenerate(state, { bypassCooldown: true });
       ensureRenderLoop(state);
       closeMenu();
     });
@@ -428,10 +458,14 @@ function setAutoGenerate(state, value) {
   state.autoGenerate = value;
   savePrefs(state);
   if (!value) {
-    cancelPending(state);
+    cancelCooldownTimer(state);
+    state.cooldownStartedAt = null;
+    state.cooldownDeadline = null;
+    state.pendingChange = false;
     setStatus('Idle', 'idle');
   } else if (state.waypoints.length >= 2) {
-    scheduleGenerate(state);
+    // Flipping to ON with an already-routeable recipe fires immediately.
+    maybeFireGenerate(state);
     ensureRenderLoop(state);
   }
   renderGenerateControl(state);
@@ -465,9 +499,13 @@ async function main() {
     generatedVersion: -1,
     autoGenerate: false,
     debounceMs: 5000,
-    pendingTimer: null,
+    // Cooldown / leading-edge state (trailing-edge fire happens automatically
+    // when cooldownTimer expires with pendingChange=true).
+    cooldownTimer: null,
+    cooldownStartedAt: null,
+    cooldownDeadline: null,
+    pendingChange: false,
     isGenerating: false,
-    lastGenerateAt: 0,
   };
 
   loadPrefs(state);
@@ -503,8 +541,11 @@ async function main() {
     if (state.autoGenerate) {
       setAutoGenerate(state, false);
     } else {
-      cancelPending(state);
-      tryGenerate(state);
+      // Manual mode: fire immediately, bypass any lingering cooldown.
+      cancelCooldownTimer(state);
+      state.cooldownDeadline = null;
+      state.cooldownStartedAt = null;
+      maybeFireGenerate(state, { bypassCooldown: true });
       ensureRenderLoop(state);
     }
   });
