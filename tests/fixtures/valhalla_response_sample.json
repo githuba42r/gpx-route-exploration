@@ -1,0 +1,24 @@
+{
+  "trip": {
+    "legs": [
+      {
+        "summary": {
+          "length": 2.0,
+          "time": 360.0
+        },
+        "shape": "kpfxFvc|iZ@?@??A??@?@??A??@?@??A?"
+      },
+      {
+        "summary": {
+          "length": 1.5,
+          "time": 300.0
+        },
+        "shape": "gmfxFbc|iZ@?@??A??@?@??A?"
+      }
+    ],
+    "summary": {
+      "length": 3.5,
+      "time": 660.0
+    }
+  }
+}
