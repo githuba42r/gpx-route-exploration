@@ -110,11 +110,16 @@ async function ensureRouteId() {
 // -------------------- drawing --------------------
 
 function updatePreviewLine(state) {
+  // Always remove the existing preview before deciding whether to draw a new
+  // one — keeps state clean even if the decision flips to "hide".
+  if (state.previewLine) { state.map.removeLayer(state.previewLine); state.previewLine = null; }
+  // If a fresh road-snapped route is already drawn the dashed preview is
+  // redundant noise. Only show the preview when there's no generated route
+  // to display.
+  if (state.generatedLayer) return;
   const pts = state.waypoints
     .filter(w => w.included !== 0 && w.lat != null && w.lon != null)
     .map(w => [w.lat, w.lon]);
-
-  if (state.previewLine) { state.map.removeLayer(state.previewLine); state.previewLine = null; }
   if (pts.length < 2) return;
   state.previewLine = L.polyline(pts, {
     color: state.previewColor, weight: 3, opacity: 0.85, dashArray: '6 8', interactive: false,
@@ -142,6 +147,8 @@ function drawGeneratedRoute(state, legs) {
   state.generatedLayer = L.polyline(allLatLngs, {
     color: state.routeColor, weight: 4, opacity: 0.9, interactive: false,
   }).addTo(state.map);
+  // Generated route just landed — hide the dashed preview underneath.
+  updatePreviewLine(state);
 }
 
 function applyColors(state) {
@@ -199,13 +206,14 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
       },
     },
   );
-  updatePreviewLine(state);
   // If waypoints changed since last successful generate, the generated track
   // is stale — drop it so the user isn't looking at a line that no longer
-  // matches their stops.
+  // matches their stops. Must happen BEFORE updatePreviewLine so the preview
+  // can reappear once the generated layer is gone.
   if (state.generatedVersion !== state.currentVersion) {
     clearGeneratedLayer(state);
   }
+  updatePreviewLine(state);
 }
 
 async function onWaypointsChanged(state, editor) {

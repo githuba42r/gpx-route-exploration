@@ -352,6 +352,66 @@ def test_cached_legs_drawn_on_page_load(page, server_url):
     expect(page.locator("#generate-status")).not_to_contain_text("cached", timeout=2000)
 
 
+def test_preview_hidden_when_generated_route_drawn(page, server_url):
+    """Once /generate returns and the road-snapped route is drawn, the
+    dashed preview polyline should be removed — two overlapping lines is
+    visual noise. When the user edits a waypoint the generated layer is
+    invalidated and the preview should reappear."""
+    _goto_create_fresh(page, server_url)
+    # Mock a successful /generate with a single-leg shape.
+    # Precomputed polyline for [(-27.40, 152.90), (-27.41, 152.91)] at
+    # precision 6; decodes to two valid lat/lon pairs so drawGeneratedRoute
+    # actually adds a Leaflet polyline to the map.
+    valid_polyline = '~rjgs@_ygsbH~oR_pR'
+    page.route("**/api/routes/*/generate", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body=f'{{"legs_count":1,"distance_km":0.5,"duration_s":120,'
+             f'"gpx_url":"/api/gpx/1",'
+             f'"legs":[{{"from_position":0,"to_position":1,"distance_m":500,'
+             f'"duration_s":120,"polyline":"{valid_polyline}"}}]}}',
+    ))
+
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+
+    # Before generate: dashed preview is visible (has a stroke-dasharray).
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => p.getAttribute('stroke-dasharray'))",
+        timeout=3000,
+    )
+
+    # Trigger a manual generate.
+    page.locator("#btn-gen-primary").click()
+
+    # After generate: solid generated polyline exists, no dashed preview.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .every(p => !p.getAttribute('stroke-dasharray'))",
+        timeout=5000,
+    )
+    # And a non-dashed path is present (the generated layer).
+    has_solid = page.evaluate(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => !p.getAttribute('stroke-dasharray'))"
+    )
+    assert has_solid, "generated route layer missing after /generate"
+
+    # Now edit — add a third waypoint. Preview should return because the
+    # generated layer is invalidated.
+    _click_map_at(page, "#map", 0.8, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 3", timeout=5000)
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => p.getAttribute('stroke-dasharray'))",
+        timeout=3000,
+    )
+
+
 def test_menu_color_picker_updates_preview_line(page, server_url):
     """Changing the Preview colour in the ▾ menu updates the live preview
     polyline's stroke and persists to localStorage."""
