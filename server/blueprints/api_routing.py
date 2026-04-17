@@ -49,7 +49,14 @@ def generate_route(route_id):
             round_trip=bool(opts.get("round_trip")),
         )
     except vc.ValhallaError as e:
-        return jsonify({"error": f"Valhalla upstream error: {e}"}), 502
+        payload = {
+            "error": "Upstream routing service failed",
+            "detail": str(e),
+            "upstream_url": e.upstream_url,
+        }
+        if e.upstream_body:
+            payload["upstream_body"] = e.upstream_body
+        return jsonify(payload), 502
 
     parsed_legs = vc.parse_legs(response)
     if len(parsed_legs) != len(wps) - 1 and not opts.get("round_trip"):
@@ -80,6 +87,18 @@ def generate_route(route_id):
         "distance_km": distance_km,
         "duration_s": duration_s,
         "gpx_url": f"/api/gpx/{route_id}",
+        # Encoded polylines (precision 6) so the Create page can draw the
+        # generated track inline without a follow-up /legs round-trip.
+        "legs": [
+            {
+                "from_position": row["from_position"],
+                "to_position": row["to_position"],
+                "distance_m": row["distance_m"],
+                "duration_s": row["duration_s"],
+                "polyline": row["polyline"],
+            }
+            for row in legs_rows
+        ],
     }), 200
 
 

@@ -14,13 +14,12 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 def _mock_requests_post(response_json, status_code=200):
     m = MagicMock()
     m.status_code = status_code
+    m.ok = status_code < 400
     m.json.return_value = response_json
-    m.raise_for_status = lambda: None
+    m.text = ""
     if status_code >= 400:
-        def _raise():
-            from requests import HTTPError
-            raise HTTPError(f"HTTP {status_code}")
-        m.raise_for_status = _raise
+        import json as _json
+        m.text = _json.dumps(response_json)
     return m
 
 

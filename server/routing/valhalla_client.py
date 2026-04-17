@@ -1,11 +1,25 @@
 """Thin Valhalla /route HTTP client."""
 
+import logging
+
 import requests
 from flask import current_app
 
+log = logging.getLogger(__name__)
+
 
 class ValhallaError(Exception):
-    """Raised when Valhalla returns a non-2xx or malformed response."""
+    """Raised when Valhalla returns a non-2xx or malformed response.
+
+    Carries the upstream URL that was attempted and, when available,
+    the upstream response body — so callers can surface "which server
+    failed and why" without leaking raw exception formatting to users.
+    """
+
+    def __init__(self, message, *, upstream_url=None, upstream_body=None):
+        super().__init__(message)
+        self.upstream_url = upstream_url
+        self.upstream_body = upstream_body
 
 
 def build_request_body(waypoints, profile, costing_options=None, round_trip=False):
@@ -36,11 +50,24 @@ def call_route(waypoints, profile, costing_options=None, round_trip=False, timeo
         raise ValueError("at least 2 waypoints required")
     body = build_request_body(waypoints, profile, costing_options, round_trip)
     url = current_app.config["VALHALLA_URL"].rstrip("/") + "/route"
+    log.info("valhalla: POST %s (%d waypoints, profile=%s, round_trip=%s)",
+             url, len(waypoints), profile, round_trip)
     try:
         r = requests.post(url, json=body, timeout=timeout)
-        r.raise_for_status()
     except requests.RequestException as e:
-        raise ValhallaError(str(e)) from e
+        log.warning("valhalla: request to %s failed: %s", url, e)
+        raise ValhallaError(
+            f"could not reach Valhalla at {url}: {e}",
+            upstream_url=url,
+        ) from e
+    if not r.ok:
+        body_text = r.text[:500] if r.text else ""
+        log.warning("valhalla: %s returned %s: %s", url, r.status_code, body_text)
+        raise ValhallaError(
+            f"Valhalla at {url} returned HTTP {r.status_code}",
+            upstream_url=url,
+            upstream_body=body_text,
+        )
     return r.json()
 
 

@@ -86,8 +86,26 @@ def test_generate_writes_legs_and_gpx_file(client, app):
 def test_generate_valhalla_error_returns_502(client):
     rid = _create_route_with_three_waypoints(client)
     with patch("server.routing.valhalla_client.requests.post") as mock_post:
-        import requests
-        mock_post.return_value.raise_for_status.side_effect = requests.HTTPError("upstream fail")
+        mock_post.return_value.ok = False
         mock_post.return_value.status_code = 500
+        mock_post.return_value.text = '{"error":"upstream fail"}'
         resp = client.post(f"/api/routes/{rid}/generate")
     assert resp.status_code == 502
+    body = resp.get_json()
+    assert body["error"] == "Upstream routing service failed"
+    assert "upstream_url" in body and "/route" in body["upstream_url"]
+    assert "upstream_body" in body and "upstream fail" in body["upstream_body"]
+
+
+def test_generate_success_includes_legs_in_response(client):
+    rid = _create_route_with_three_waypoints(client)
+    fake = _fake_valhalla_response()
+    with patch("server.routing.valhalla_client.requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = fake
+        resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert "legs" in body and len(body["legs"]) == 2
+    assert body["legs"][0]["polyline"] == fake["trip"]["legs"][0]["shape"]
