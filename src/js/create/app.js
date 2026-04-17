@@ -823,6 +823,12 @@ async function main() {
         await api.deleteWaypoint(state.routeId, wptId);
         await onWaypointsChanged(state, editor);
       },
+      // Collapse the whole sidebar, not just the widget inside — otherwise
+      // the aside stays at 340 px and the map keeps a dark dead strip on
+      // its right edge.
+      onCollapseToggle: (isCollapsed) => {
+        document.getElementById('editor-panel').classList.toggle('collapsed', isCollapsed);
+      },
     },
   );
 
