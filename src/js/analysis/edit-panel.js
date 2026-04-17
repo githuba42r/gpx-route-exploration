@@ -209,6 +209,11 @@ export function initEditPanel({ map, routeId }) {
       state.markDirty();
       await state.refresh();
     },
+    // When the widget's ▶/◀ collapse button flips, shrink the whole
+    // panel to a ~32 px vertical tab so the map gets its width back.
+    onCollapseToggle: (isCollapsed) => {
+      document.getElementById('edit-panel').classList.toggle('collapsed', isCollapsed);
+    },
   });
 
   const onMapClick = async (e) => {

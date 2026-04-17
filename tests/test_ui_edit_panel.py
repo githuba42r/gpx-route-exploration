@@ -105,6 +105,40 @@ def test_add_waypoint_via_map_click_inside_panel(page, server_url):
     expect(page.locator("#edit-panel-status")).to_contain_text("Edits pending")
 
 
+def test_collapse_shrinks_panel_to_narrow_tab(page, server_url):
+    """Clicking the widget's collapse button collapses the whole panel to
+    a narrow ~36 px tab — the close button and status/regen row hide; only
+    the expand arrow on the editor widget remains clickable."""
+    rid = _create_recipe_route(server_url, n_waypoints=2)
+    _open_analysis(page, server_url, rid)
+    page.locator("#btn-open-edit").click()
+    expect(page.locator("#edit-panel-overlay")).to_have_class("open")
+
+    # Panel is at its normal expanded width.
+    expanded_width = page.locator("#edit-panel").bounding_box()["width"]
+    assert expanded_width > 200, f"unexpectedly narrow: {expanded_width}"
+
+    # Click the collapse button inside the editor widget.
+    page.locator(".wpe-collapse").click()
+    # Width should shrink below 50 px.
+    page.wait_for_function(
+        "() => document.getElementById('edit-panel').getBoundingClientRect().width < 50",
+        timeout=2000,
+    )
+    # The panel's close button + regen/status foot are hidden.
+    expect(page.locator("#btn-close-edit")).to_be_hidden()
+    expect(page.locator("#edit-panel-foot")).to_be_hidden()
+
+    # Expand by clicking the same button again — panel returns to wide.
+    page.locator(".wpe-collapse").click()
+    page.wait_for_function(
+        "() => document.getElementById('edit-panel').getBoundingClientRect().width > 200",
+        timeout=2000,
+    )
+    expect(page.locator("#btn-close-edit")).to_be_visible()
+    expect(page.locator("#edit-panel-foot")).to_be_visible()
+
+
 def test_regenerate_button_calls_generate_and_reloads(page, server_url):
     """Clicking Regenerate hits /generate and then reloads the page. We
     mock /generate so the test is deterministic regardless of Valhalla."""
