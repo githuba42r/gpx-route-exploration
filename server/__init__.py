@@ -19,6 +19,11 @@ def create_app(config_override=None):
     if config_override:
         app.config.update(config_override)
 
+    # Dev convenience: don't let the browser cache /static/ assets for longer
+    # than a request — combined with ?v={{ asset_version }} in templates, it
+    # makes stale bundles impossible across restarts.
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
     # Expose ASSET_VERSION to every Jinja template.
     @app.context_processor
     def _inject_asset_version():
