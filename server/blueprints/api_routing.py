@@ -60,14 +60,45 @@ def generate_route(route_id):
         return jsonify(payload), 502
 
     parsed_legs = vc.parse_legs(response)
-    if len(parsed_legs) != len(wps) - 1 and not opts.get("round_trip"):
-        return jsonify({"error": f"Valhalla returned {len(parsed_legs)} legs, expected {len(wps)-1}"}), 502
 
+    # Valhalla collapses interior `through`-type locations into a single leg
+    # between adjacent `break`-type locations, so the leg count equals the
+    # number of break boundaries minus 1 (or same as breaks if round-trip,
+    # because the closing leg back to the first break is counted too).
+    # We replicate the break-determination logic from valhalla_client.build_request_body.
+    break_positions = []
+    kinds = [w.get("kind") or "stop" for w in wps]
+    n = len(wps)
+    for i, w in enumerate(wps):
+        is_endpoint = i == 0 or i == n - 1
+        if is_endpoint or kinds[i] == "stop":
+            break_positions.append(w["position"])
+
+    expected_legs = len(break_positions) - 1
+    if opts.get("round_trip"):
+        expected_legs = len(break_positions)
+
+    if len(parsed_legs) != expected_legs:
+        return jsonify({
+            "error": "Upstream routing service failed",
+            "detail": (
+                f"Valhalla returned {len(parsed_legs)} legs, expected {expected_legs} "
+                f"({len(break_positions)} break-type locations: "
+                f"{len(wps) - len(break_positions)} interior waypoints collapsed into through-points)"
+            ),
+        }), 502
+
+    # Pair each returned leg with its from/to break-type positions. Interior
+    # `through` waypoints are silently included inside the leg's polyline.
     legs_rows = []
     for i, leg in enumerate(parsed_legs):
+        from_pos = break_positions[i]
+        # Round-trip's last leg returns to break_positions[0].
+        to_pos = break_positions[(i + 1) % len(break_positions)] \
+                 if opts.get("round_trip") else break_positions[i + 1]
         legs_rows.append({
-            "from_position": wps[i]["position"],
-            "to_position": wps[(i + 1) % len(wps)]["position"],
+            "from_position": from_pos,
+            "to_position": to_pos,
             "distance_m": leg["distance_m"],
             "duration_s": leg["duration_s"],
             "polyline": leg["polyline"],

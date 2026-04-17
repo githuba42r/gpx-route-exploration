@@ -109,3 +109,89 @@ def test_generate_success_includes_legs_in_response(client):
     body = resp.get_json()
     assert "legs" in body and len(body["legs"]) == 2
     assert body["legs"][0]["polyline"] == fake["trip"]["legs"][0]["shape"]
+
+
+def _create_route_with_4_pins_mixed_kinds(client):
+    """Create a route with stop-waypoint-waypoint-stop. Endpoints are
+    auto-break; the two interior 'waypoint' kinds collapse into through
+    points, so Valhalla returns only 1 leg (start → end)."""
+    r = client.post(
+        "/api/routes",
+        json={"title": "mixed-kinds", "profile": "bicycle"},
+        content_type="application/json",
+    )
+    rid = r.get_json()["id"]
+    for name, lat, lon, kind in [
+        ("A",  -27.40, 152.90, "stop"),
+        ("B",  -27.41, 152.91, "waypoint"),
+        ("C",  -27.42, 152.92, "waypoint"),
+        ("D",  -27.43, 152.93, "stop"),
+    ]:
+        client.post(
+            f"/api/routes/{rid}/waypoints",
+            json={"name": name, "lat": lat, "lon": lon, "kind": kind},
+        )
+    return rid
+
+
+def test_generate_accepts_single_leg_when_interior_waypoints_collapse(client):
+    """Regression guard for the 'Valhalla returned 1 legs, expected 3' error.
+    With two interior through-type waypoints, Valhalla returns a single leg
+    end-to-end, and api_routing must accept that + map it to from_position=0,
+    to_position=3 (the break-type endpoints)."""
+    rid = _create_route_with_4_pins_mixed_kinds(client)
+    leg = encode_polyline(
+        [(-27.40, 152.90), (-27.41, 152.91), (-27.42, 152.92), (-27.43, 152.93)],
+        precision=6,
+    )
+    fake_single_leg = {
+        "trip": {
+            "legs": [{"summary": {"length": 4.0, "time": 1000.0}, "shape": leg}],
+            "summary": {"length": 4.0, "time": 1000.0},
+        }
+    }
+    with patch("server.routing.valhalla_client.requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = fake_single_leg
+        resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200, resp.data
+    body = resp.get_json()
+    assert body["legs_count"] == 1
+    assert body["legs"][0]["from_position"] == 0
+    assert body["legs"][0]["to_position"] == 3   # skips the two through-points
+
+
+def test_generate_stop_waypoint_stop_yields_two_legs(client):
+    """Stop-Waypoint-Stop: one interior through waypoint, but the middle
+    location is NOT a break — so Valhalla still returns 1 leg end-to-end
+    (A -> C via B). Expected legs = break_count (2) - 1 = 1."""
+    r = client.post(
+        "/api/routes",
+        json={"title": "mixed3", "profile": "bicycle"},
+        content_type="application/json",
+    )
+    rid = r.get_json()["id"]
+    for name, lat, lon, kind in [
+        ("A",  -27.40, 152.90, "stop"),
+        ("B",  -27.41, 152.91, "waypoint"),
+        ("C",  -27.42, 152.92, "stop"),
+    ]:
+        client.post(
+            f"/api/routes/{rid}/waypoints",
+            json={"name": name, "lat": lat, "lon": lon, "kind": kind},
+        )
+    leg = encode_polyline(
+        [(-27.40, 152.90), (-27.41, 152.91), (-27.42, 152.92)], precision=6)
+    fake = {"trip": {"legs": [{"summary": {"length": 3.0, "time": 600}, "shape": leg}],
+                      "summary": {"length": 3.0, "time": 600}}}
+    with patch("server.routing.valhalla_client.requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = fake
+        resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200, resp.data
+    body = resp.get_json()
+    assert body["legs_count"] == 1
+    assert body["legs"][0]["from_position"] == 0
+    assert body["legs"][0]["to_position"] == 2
