@@ -1,0 +1,34 @@
+{% extends "_base.html" %}
+{% block title %}New Route — GPX Route Exploration{% endblock %}
+{% block css %}
+<link rel="stylesheet" href="/static/dist/create.min.css">
+{% endblock %}
+{% block nav_items %}
+<a href="/">&larr; Library</a>
+<span class="nav-route-title">New Route</span>
+{% endblock %}
+{% block content %}
+<div id="create-header">
+  <input id="route-title" type="text" placeholder="Route title…" value="Untitled Route">
+  <span id="create-hint">Click the map to drop a waypoint. Right-click to mark as stop.</span>
+  <div style="flex:1;"></div>
+  <select id="route-profile" disabled title="Profile selection ships in M3">
+    <option value="bicycle">Bike</option>
+  </select>
+  <label id="pin-start-label" title="When checked, the first waypoint is marked as the route's start.">
+    <input id="pin-start-cb" type="checkbox"> Pin first as start
+  </label>
+  <button id="btn-optimise" type="button" disabled title="Optimisation ships in M3">Optimise</button>
+  <button id="btn-generate" type="button">Generate Route</button>
+  <button id="btn-save" type="button">Save</button>
+</div>
+
+<div id="create-main">
+  <div id="map" style="position:relative;"></div>
+  <aside id="editor-panel"></aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/dist/create.min.js"></script>
+{% endblock %}
