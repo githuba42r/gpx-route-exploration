@@ -78,7 +78,12 @@ def write_track_gpx(path, *, title, legs, precision=6):
     ET.SubElement(trk, "name").text = title
     trkseg = ET.SubElement(trk, "trkseg")
     for lat, lon in all_points:
-        ET.SubElement(trkseg, "trkpt", {"lat": f"{lat:.7f}", "lon": f"{lon:.7f}"})
+        # Always emit <ele>. The analysis page's loader skips trkpts without
+        # elevation. Real elevation wiring from Valhalla's elevation_interval
+        # samples lands in M3; for now emit 0 so the file is valid GPX and
+        # the analysis pipeline can load + render it.
+        trkpt = ET.SubElement(trkseg, "trkpt", {"lat": f"{lat:.7f}", "lon": f"{lon:.7f}"})
+        ET.SubElement(trkpt, "ele").text = "0"
 
     xml_bytes = ET.tostring(gpx, encoding="utf-8", xml_declaration=True)
     pretty = minidom.parseString(xml_bytes).toprettyxml(indent="  ", encoding="utf-8")

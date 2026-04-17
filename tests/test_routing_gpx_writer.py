@@ -27,3 +27,7 @@ def test_write_track_gpx_produces_valid_xml(tmp_path):
     assert '<name>Test Route</name>' in content
     # Two legs concatenated → three distinct trkpts (leg boundary deduped).
     assert content.count('<trkpt') == 3
+    # Every trkpt must carry <ele> — without it the analysis page's loader
+    # drops the point and crashes on 'points[0].dist = ...'. Placeholder 0 is
+    # fine until M3 wires real elevation from Valhalla's samples.
+    assert content.count('<ele>') == 3

@@ -29,9 +29,15 @@ export async function loadGPX() {
   trkpts.forEach(pt => {
     const lat = parseFloat(pt.getAttribute('lat'));
     const lon = parseFloat(pt.getAttribute('lon'));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     const eleEl = pt.querySelector('ele');
-    const ele = eleEl ? parseFloat(eleEl.textContent) : null;
-    if (ele !== null) points.push({ lat, lon, ele });
+    // Default elevation to 0 when the trkpt has no <ele> — the whole
+    // analysis pipeline (distance, gradient, profile) happily runs on flat
+    // data. Previously we dropped such points silently, which left the
+    // points array empty and threw 'Cannot set properties of undefined
+    // (setting "dist")' inside computeDistances on any GPX without ele.
+    const ele = eleEl ? parseFloat(eleEl.textContent) : 0;
+    points.push({ lat, lon, ele: Number.isFinite(ele) ? ele : 0 });
   });
 
   const nameEl = doc.querySelector('metadata name');
