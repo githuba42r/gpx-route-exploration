@@ -152,6 +152,247 @@ def test_stop_context_menu_offers_edit_details(page, server_url):
     page.locator("#stop-edit-cancel").click()
 
 
+# --------------------------------------------------------------------------
+# Coverage for post-plan fixes: tile-layer picker, route-color picker,
+# colour persistence, menu dismissal, drag-snap, cached-legs positive path,
+# WP tab label, delete-arming reset.
+# --------------------------------------------------------------------------
+
+
+def test_waypoints_tab_label_is_WP_with_tooltip(page, server_url):
+    _goto_create_fresh(page, server_url)
+    wp_tab = page.locator(".wpe-tab[data-tab='waypoints']")
+    expect(wp_tab).to_contain_text("WP")
+    # Verify the full word 'Waypoints' is no longer in the tab label.
+    assert "Waypoints" not in wp_tab.inner_text()
+    title = wp_tab.get_attribute("title")
+    assert title and "transit" in title.lower(), f"unexpected tooltip: {title!r}"
+
+    stops_tab = page.locator(".wpe-tab[data-tab='stops']")
+    stops_title = stops_tab.get_attribute("title")
+    assert stops_title and "extended stop" in stops_title.lower(), f"unexpected tooltip: {stops_title!r}"
+
+
+def test_pin_context_menu_closes_on_escape(page, server_url):
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+    page.locator(".wpe-marker").first.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("#pin-ctx-menu")).to_be_hidden()
+
+
+def test_pin_context_menu_closes_on_outside_click(page, server_url):
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+    page.locator(".wpe-marker").first.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible()
+    # Click on the title input — well outside the menu.
+    page.locator("#route-title").click()
+    expect(page.locator("#pin-ctx-menu")).to_be_hidden()
+
+
+def test_delete_arming_resets_when_menu_reopens(page, server_url):
+    """After arming delete, closing the menu without confirming resets the
+    button label on the next open."""
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+    page.locator(".wpe-marker").first.click(button="right")
+    del_btn = page.locator("#pin-ctx-menu button[data-act='delete']")
+    del_btn.click()
+    expect(del_btn).to_have_text("Click again to confirm delete")
+    page.keyboard.press("Escape")
+    # Re-open — label is back to 'Delete'.
+    page.locator(".wpe-marker").first.click(button="right")
+    del_btn = page.locator("#pin-ctx-menu button[data-act='delete']")
+    expect(del_btn).to_have_text("Delete")
+
+
+def test_drag_marker_snaps_to_nearby_road(page, server_url):
+    """Dragging an existing pin should consult /locate and use the snapped
+    coords if a road is within 10 m."""
+    _goto_create_fresh(page, server_url)
+    # Phase 1 — drop a pin; don't mock /locate yet so the click-add uses raw
+    # coords (we don't care where this initial pin lands for the drag test).
+    _click_map_at(page, "#map", 0.4, 0.5)
+    page.wait_for_selector(".wpe-item", timeout=3000)
+
+    # Phase 2 — mock /locate to return a specific snap lat/lon for the drag.
+    snap_lat, snap_lon = -27.31415, 152.71828
+    page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body=f'[{{"edges":[{{"correlated_lat":{snap_lat},"correlated_lon":{snap_lon},"distance":3.0}}]}}]',
+    ))
+
+    # Drag the marker to a new position. Leaflet's marker-drag is driven by
+    # browser mouse events; simulate mousedown on the marker, move, mouseup.
+    marker = page.locator(".wpe-marker").first
+    box = marker.bounding_box()
+    assert box
+    start_x = box["x"] + box["width"] / 2
+    start_y = box["y"] + box["height"] / 2
+    map_box = page.locator("#map").bounding_box()
+    end_x = map_box["x"] + 0.7 * map_box["width"]
+    end_y = map_box["y"] + 0.3 * map_box["height"]
+
+    page.mouse.move(start_x, start_y)
+    page.mouse.down()
+    # Leaflet needs incremental moves to recognise the drag.
+    steps = 8
+    for i in range(1, steps + 1):
+        page.mouse.move(
+            start_x + (end_x - start_x) * i / steps,
+            start_y + (end_y - start_y) * i / steps,
+        )
+    page.mouse.up()
+
+    # After drop, the waypoint's persisted coords match the mocked snap.
+    page.wait_for_function(
+        f"async () => {{"
+        f"  const rid = new URL(location.href).searchParams.get('route_id');"
+        f"  const r = await fetch(`/api/routes/${{rid}}/waypoints`);"
+        f"  const wpts = await r.json();"
+        f"  return wpts[0] && Math.abs(wpts[0].lat - ({snap_lat})) < 1e-5"
+        f"           && Math.abs(wpts[0].lon - ({snap_lon})) < 1e-5;"
+        f"}}",
+        timeout=5000,
+    )
+
+
+def test_cached_legs_drawn_on_page_load_positive(page, server_url):
+    """Opening /create?route_id=X with cached legs in the DB draws the
+    solid generated route immediately + sets status to Ready · cached."""
+    _goto_create_fresh(page, server_url)
+    route_id = page.evaluate("() => new URL(location.href).searchParams.get('route_id')")
+    import requests as _r
+    for lat, lon in [(-27.40, 152.90), (-27.41, 152.91)]:
+        _r.post(f"{server_url}/api/routes/{route_id}/waypoints",
+                json={"name": f"{lat}", "lat": lat, "lon": lon, "kind": "stop"},
+                timeout=5)
+    # Mock /legs to pretend a previous generate stored one leg.
+    valid_polyline = '~rjgs@_ygsbH~oR_pR'
+    page.route(f"**/api/routes/{route_id}/legs", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body=(f'[{{"route_id":{route_id},"from_position":0,"to_position":1,'
+              f'"distance_m":1000,"duration_s":300,"polyline":"{valid_polyline}"}}]'),
+    ))
+    page.goto(f"{server_url}/create?route_id={route_id}")
+    expect(page.locator("#generate-status")).to_contain_text("cached", timeout=5000)
+    # Solid polyline present in the overlay pane.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => !p.getAttribute('stroke-dasharray') && p.getAttribute('stroke'))",
+        timeout=3000,
+    )
+
+
+def test_menu_route_color_updates_generated_layer(page, server_url):
+    """Changing the Route colour applies to the generated polyline on the map."""
+    _goto_create_fresh(page, server_url)
+    # Mock /generate so the route lands without Valhalla.
+    valid_polyline = '~rjgs@_ygsbH~oR_pR'
+    page.route("**/api/routes/*/generate", lambda route: route.fulfill(
+        status=200,
+        content_type="application/json",
+        body=(f'{{"legs_count":1,"distance_km":0.5,"duration_s":120,'
+              f'"gpx_url":"/api/gpx/1","legs":[{{"from_position":0,"to_position":1,'
+              f'"distance_m":500,"duration_s":120,"polyline":"{valid_polyline}"}}]}}'),
+    ))
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+    page.locator("#btn-gen-primary").click()
+    # Wait for the generated (non-dashed) polyline to appear.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => !p.getAttribute('stroke-dasharray'))",
+        timeout=5000,
+    )
+    # Open the menu, change Route colour to a striking green.
+    page.locator("#btn-gen-dropdown").click()
+    page.evaluate("""() => {
+      const inp = document.getElementById('menu-route-color');
+      inp.value = '#22dd33';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    }""")
+    # Generated polyline stroke now matches.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => (p.getAttribute('stroke') || '').toLowerCase() === '#22dd33'"
+        "           && !p.getAttribute('stroke-dasharray'))",
+        timeout=3000,
+    )
+    # Persistence.
+    stored = page.evaluate("() => localStorage.getItem('gpx-create-route-color')")
+    assert stored == '#22dd33'
+
+
+def test_menu_colors_persist_across_reload(page, server_url):
+    _goto_create_fresh(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+
+    page.locator("#btn-gen-dropdown").click()
+    page.evaluate("""() => {
+      document.getElementById('menu-route-color').value = '#00ff00';
+      document.getElementById('menu-route-color').dispatchEvent(new Event('input', {bubbles:true}));
+      document.getElementById('menu-preview-color').value = '#ff00ff';
+      document.getElementById('menu-preview-color').dispatchEvent(new Event('input', {bubbles:true}));
+    }""")
+    assert page.evaluate("() => localStorage.getItem('gpx-create-route-color')") == '#00ff00'
+    assert page.evaluate("() => localStorage.getItem('gpx-create-preview-color')") == '#ff00ff'
+
+    page.reload()
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+    page.locator("#btn-gen-dropdown").click()
+    expect(page.locator("#menu-route-color")).to_have_value("#00ff00")
+    expect(page.locator("#menu-preview-color")).to_have_value("#ff00ff")
+
+
+def test_tile_layer_preference_persists_across_reload(page, server_url):
+    """Seed localStorage with a non-default base layer and reload — the
+    corresponding tile URL should be active on the map."""
+    _goto_create_fresh(page, server_url)
+    page.evaluate("() => localStorage.setItem('gpx-map-base-layer', 'OpenTopoMap (Contours)')")
+    page.reload()
+    # Wait for at least one tile whose URL comes from opentopomap.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-tile')).some("
+        "  img => (img.src || '').includes('opentopomap.org'))",
+        timeout=8000,
+    )
+
+
+def test_tile_layer_switch_writes_to_localStorage(page, server_url):
+    """Switching the base layer via the Leaflet control persists the choice."""
+    _goto_create_fresh(page, server_url)
+    # The Leaflet control is collapsed; click a base-layer radio directly.
+    page.evaluate("""() => {
+      const labels = document.querySelectorAll('.leaflet-control-layers-base label');
+      for (const lbl of labels) {
+        if (lbl.textContent.trim() === 'Satellite') {
+          lbl.querySelector('input').click();
+          return;
+        }
+      }
+      throw new Error('Satellite label not found');
+    }""")
+    # localStorage now holds 'Satellite'.
+    page.wait_for_function(
+        "() => localStorage.getItem('gpx-map-base-layer') === 'Satellite'",
+        timeout=3000,
+    )
+
+
 def test_drag_reorder_waypoints(page, server_url):
     """Drag the second sidebar row above the first; verify the PUT reorder
     API landed and the list order swapped."""

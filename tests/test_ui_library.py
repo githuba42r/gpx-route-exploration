@@ -61,3 +61,17 @@ def test_delete_route_cancel(page, server_url):
     page.locator(".route-card .delete-btn").first.click()
     page.locator("#confirm-modal-overlay .confirm-no").click()
     expect(page.locator(".route-card")).to_have_count(1)
+
+
+def test_new_route_button_navigates_to_create(page, server_url):
+    """The '+ New Route' button added in M1 Task 16 takes the user to
+    /create, where the Create page auto-creates a recipe-only route and
+    rewrites the URL with ?route_id=<n>."""
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(server_url)
+    expect(page.locator("button.new-route-btn")).to_be_visible()
+    page.locator("button.new-route-btn").click()
+    # Ends up on /create?route_id=<n>.
+    page.wait_for_url(lambda url: url.rstrip('/').endswith('/create') or '/create?' in url,
+                       timeout=5000)
+    assert '/create' in page.url

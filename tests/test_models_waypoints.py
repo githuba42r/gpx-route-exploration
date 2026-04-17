@@ -1,6 +1,7 @@
 """Schema and model tests for route_waypoints, route_options, route_legs."""
 
 from server.models import get_db
+from server.models import _apply_runtime_migrations
 
 
 def _tables(db):
@@ -141,3 +142,120 @@ def test_update_options(app):
         updated = wp_model.update_options(route["id"], round_trip=1, profile="pedestrian")
         assert updated["round_trip"] == 1
         assert updated["profile"] == "pedestrian"
+
+
+# ---------- runtime migrations + nullable-clear + arrival_time ----------
+
+def test_arrival_time_column_exists_after_init(app):
+    """The schema (plus the runtime migration for older DBs) guarantees an
+    arrival_time column on route_waypoints."""
+    with app.app_context():
+        db = get_db()
+        cols = {r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall()}
+        assert "arrival_time" in cols
+
+
+def test_runtime_migration_adds_arrival_time_on_preexisting_db(app):
+    """Simulate an older DB that has route_waypoints without arrival_time, and
+    verify _apply_runtime_migrations adds it — without dropping any data."""
+    with app.app_context():
+        db = get_db()
+        # Seed a waypoint on a stub route so we can assert data survives the ALTER.
+        route = _create_stub_route(app, title="Migrate test")
+        w = wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0, kind="stop")
+
+        # Recreate the table without the column to simulate an older deployment.
+        db.executescript("""
+            CREATE TABLE route_waypoints_old AS SELECT
+              id, route_id, position, kind, name, address, lat, lon,
+              included, pin_role, dwell_minutes, description
+            FROM route_waypoints;
+            DROP TABLE route_waypoints;
+            CREATE TABLE route_waypoints (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+              position INTEGER NOT NULL,
+              kind TEXT NOT NULL CHECK(kind IN ('stop','waypoint')),
+              name TEXT NOT NULL,
+              address TEXT, lat REAL, lon REAL,
+              included INTEGER NOT NULL DEFAULT 1,
+              pin_role TEXT,
+              dwell_minutes INTEGER NOT NULL DEFAULT 0,
+              description TEXT,
+              UNIQUE(route_id, position)
+            );
+            INSERT INTO route_waypoints SELECT * FROM route_waypoints_old;
+            DROP TABLE route_waypoints_old;
+        """)
+        db.commit()
+
+        # Verify the column is missing pre-migration.
+        cols_before = {r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall()}
+        assert "arrival_time" not in cols_before
+
+        _apply_runtime_migrations(db)
+        db.commit()
+
+        cols_after = {r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall()}
+        assert "arrival_time" in cols_after
+        # Pre-existing rows preserved.
+        row = db.execute("SELECT name FROM route_waypoints WHERE id = ?", (w["id"],)).fetchone()
+        assert row and row["name"] == "A"
+
+
+def test_runtime_migration_is_idempotent(app):
+    """Running _apply_runtime_migrations twice must not error or change anything."""
+    with app.app_context():
+        db = get_db()
+        cols_before = sorted(r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall())
+        _apply_runtime_migrations(db)
+        _apply_runtime_migrations(db)  # idempotent
+        db.commit()
+        cols_after = sorted(r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall())
+        assert cols_before == cols_after
+
+
+def test_arrival_time_round_trips_via_update_waypoint(app):
+    """arrival_time accepts an ISO 8601 string and reads back identically."""
+    with app.app_context():
+        route = _create_stub_route(app)
+        w = wp_model.append_waypoint(route["id"], name="Café", lat=0, lon=0, kind="stop")
+        iso = "2026-05-01T09:30:00Z"
+        updated = wp_model.update_waypoint(w["id"], route["id"], arrival_time=iso)
+        assert updated["arrival_time"] == iso
+        # Reading back via get.
+        fetched = wp_model.get_waypoint(w["id"], route["id"])
+        assert fetched["arrival_time"] == iso
+
+
+def test_update_waypoint_clears_nullable_fields(app):
+    """Passing None for pin_role / address / description / arrival_time must
+    actually clear them, not be filtered out as a "no-op" update."""
+    with app.app_context():
+        route = _create_stub_route(app)
+        w = wp_model.append_waypoint(
+            route["id"], name="A", lat=0, lon=0, kind="stop",
+            address="123 Main St", description="notes",
+        )
+        # Populate nullable fields.
+        w = wp_model.update_waypoint(w["id"], route["id"],
+                                     pin_role="start", arrival_time="2026-05-01T09:30:00Z")
+        assert w["pin_role"] == "start"
+        assert w["address"] == "123 Main St"
+        assert w["description"] == "notes"
+        assert w["arrival_time"] == "2026-05-01T09:30:00Z"
+
+        # Clear all four.
+        cleared = wp_model.update_waypoint(
+            w["id"], route["id"],
+            pin_role=None, address=None, description=None, arrival_time=None,
+        )
+        assert cleared["pin_role"] is None
+        assert cleared["address"] is None
+        assert cleared["description"] is None
+        assert cleared["arrival_time"] is None
+        # Non-NULLABLE fields (name, kind, lat, lon) should NOT be touched —
+        # explicit None for them is still filtered because the NULLABLE set
+        # only covers the intentionally-nullable columns.
+        assert cleared["name"] == "A"
+        assert cleared["kind"] == "stop"
