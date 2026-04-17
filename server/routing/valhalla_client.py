@@ -22,15 +22,28 @@ class ValhallaError(Exception):
         self.upstream_body = upstream_body
 
 
-def build_request_body(waypoints, profile, costing_options=None, round_trip=False):
+def build_request_body(waypoints, profile, costing_options=None, round_trip=False, kinds=None):
     """Compose the Valhalla /route request body.
 
     waypoints: list of (lat, lon) tuples. Minimum 2.
     profile: 'bicycle' | 'pedestrian' | 'auto'.
-    costing_options: dict merged into costing_options[profile]. M1 passes {}.
+    costing_options: dict merged into costing_options[profile].
     round_trip: if True, append first waypoint at the end to close the loop.
+    kinds: optional list parallel to waypoints, each 'stop' or 'waypoint'.
+           Stops and the first/last location always become Valhalla type=break
+           (a mandatory routing stop that must snap to the network). Interior
+           waypoints become type=through, which is much more forgiving about
+           off-network locations and maps naturally to "pass through, don't
+           stop". If kinds is None, everything is a break (legacy behaviour).
     """
-    locs = [{"lat": lat, "lon": lon, "type": "break"} for lat, lon in waypoints]
+    n = len(waypoints)
+    if kinds is None:
+        kinds = ["stop"] * n
+    locs = []
+    for i, (lat, lon) in enumerate(waypoints):
+        is_endpoint = i == 0 or i == n - 1
+        loc_type = "break" if (is_endpoint or kinds[i] == "stop") else "through"
+        locs.append({"lat": lat, "lon": lon, "type": loc_type})
     if round_trip and waypoints:
         lat, lon = waypoints[0]
         locs.append({"lat": lat, "lon": lon, "type": "break"})
@@ -44,11 +57,11 @@ def build_request_body(waypoints, profile, costing_options=None, round_trip=Fals
     return body
 
 
-def call_route(waypoints, profile, costing_options=None, round_trip=False, timeout=30):
+def call_route(waypoints, profile, costing_options=None, round_trip=False, kinds=None, timeout=30):
     """Call Valhalla /route and return the parsed JSON response."""
     if len(waypoints) < 2:
         raise ValueError("at least 2 waypoints required")
-    body = build_request_body(waypoints, profile, costing_options, round_trip)
+    body = build_request_body(waypoints, profile, costing_options, round_trip, kinds=kinds)
     url = current_app.config["VALHALLA_URL"].rstrip("/") + "/route"
     log.info("valhalla: POST %s (%d waypoints, profile=%s, round_trip=%s)",
              url, len(waypoints), profile, round_trip)

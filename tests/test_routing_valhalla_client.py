@@ -67,6 +67,31 @@ def test_call_fewer_than_two_waypoints_rejected(app):
             vc.call_route(waypoints=[(0.0, 0.0)], profile="bicycle")
 
 
+def test_build_request_body_kinds_map_to_break_and_through():
+    """Interior waypoints with kind='waypoint' become type='through' (forgiving
+    snap); interior stops, and all endpoints, are type='break'."""
+    body = vc.build_request_body(
+        waypoints=[(-27.4, 152.9), (-27.41, 152.91), (-27.42, 152.92), (-27.43, 152.93)],
+        profile="bicycle",
+        kinds=["stop", "waypoint", "stop", "waypoint"],
+    )
+    types = [loc["type"] for loc in body["locations"]]
+    # Position 0 is endpoint → break regardless of kind.
+    # Position 1 is interior waypoint → through.
+    # Position 2 is interior stop → break.
+    # Position 3 is endpoint → break regardless of kind.
+    assert types == ["break", "through", "break", "break"]
+
+
+def test_build_request_body_defaults_to_all_breaks():
+    """Legacy callers (no kinds) get the old behaviour: every location is a break."""
+    body = vc.build_request_body(
+        waypoints=[(0, 0), (1, 1), (2, 2)],
+        profile="bicycle",
+    )
+    assert all(loc["type"] == "break" for loc in body["locations"])
+
+
 def test_parse_legs_decodes_shape():
     with open(os.path.join(FIXTURES, "valhalla_response_sample.json")) as f:
         fake = json.load(f)

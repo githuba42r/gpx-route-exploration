@@ -47,6 +47,7 @@ def generate_route(route_id):
             profile=profile,
             costing_options={},  # M3 wires the full costing options
             round_trip=bool(opts.get("round_trip")),
+            kinds=[w.get("kind") or "stop" for w in wps],
         )
     except vc.ValhallaError as e:
         payload = {
