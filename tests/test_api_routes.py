@@ -139,6 +139,36 @@ def test_create_recipe_only_route(client):
     assert "id" in got
 
 
+def test_data_dir_resolved_to_absolute_path(app):
+    """Regression: a relative DATA_DIR (e.g. ./data from .env.development)
+    broke /api/gpx/<id> because Flask's send_file resolved the relative
+    path against the app root_path (server/) instead of the process CWD,
+    returning 500 FileNotFoundError. create_app must absolute-ise DATA_DIR."""
+    import os
+    with app.app_context():
+        d = app.config["DATA_DIR"]
+        assert os.path.isabs(d), f"DATA_DIR still relative: {d!r}"
+
+
+def test_serve_gpx_after_upload_does_not_500(client):
+    """End-to-end smoke: upload a GPX, then GET /api/gpx/<id>. Used to 500
+    with FileNotFoundError when DATA_DIR was a relative path."""
+    import io
+    gpx = (b'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">'
+           b'<trk><trkseg><trkpt lat="-27.4" lon="152.9"><ele>10</ele></trkpt>'
+           b'<trkpt lat="-27.41" lon="152.91"><ele>11</ele></trkpt></trkseg></trk></gpx>')
+    r = client.post(
+        "/api/routes",
+        data={"title": "serve-gpx", "file": (io.BytesIO(gpx), "r.gpx")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 201, r.data
+    rid = r.get_json()["id"]
+    resp = client.get(f"/api/gpx/{rid}")
+    assert resp.status_code == 200, resp.data
+    assert b"<trkpt" in resp.data
+
+
 def test_get_route_includes_has_recipe(client):
     r = client.post(
         "/api/routes",

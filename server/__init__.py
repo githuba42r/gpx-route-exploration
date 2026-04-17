@@ -29,7 +29,11 @@ def create_app(config_override=None):
     def _inject_asset_version():
         return {"asset_version": ASSET_VERSION}
 
-    # Ensure data directories exist
+    # Ensure data directories exist. Resolve DATA_DIR to an absolute path
+    # up-front so downstream code (send_file in particular) doesn't re-
+    # resolve relative paths against Flask's root_path (which is server/,
+    # not the project root) and 500 with FileNotFoundError.
+    app.config["DATA_DIR"] = os.path.abspath(app.config["DATA_DIR"])
     data_dir = app.config["DATA_DIR"]
     os.makedirs(os.path.join(data_dir, "gpx"), exist_ok=True)
 
