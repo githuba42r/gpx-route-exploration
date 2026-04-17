@@ -29,6 +29,10 @@ import * as api from '../shared/route-api.js';
 
 const STORAGE_AUTO = 'gpx-create-auto-generate';
 const STORAGE_DEBOUNCE = 'gpx-create-debounce-ms';
+const STORAGE_ROUTE_COLOR   = 'gpx-create-route-color';
+const STORAGE_PREVIEW_COLOR = 'gpx-create-preview-color';
+const DEFAULT_ROUTE_COLOR   = '#ff5f15';
+const DEFAULT_PREVIEW_COLOR = '#00e5ff';
 
 // -------------------- snap-to-road --------------------
 //
@@ -113,7 +117,7 @@ function updatePreviewLine(state) {
   if (state.previewLine) { state.map.removeLayer(state.previewLine); state.previewLine = null; }
   if (pts.length < 2) return;
   state.previewLine = L.polyline(pts, {
-    color: '#00e5ff', weight: 3, opacity: 0.85, dashArray: '6 8', interactive: false,
+    color: state.previewColor, weight: 3, opacity: 0.85, dashArray: '6 8', interactive: false,
   }).addTo(state.map);
   if (state.previewLine.bringToBack) state.previewLine.bringToBack();
 }
@@ -136,8 +140,41 @@ function drawGeneratedRoute(state, legs) {
   }
   if (allLatLngs.length < 2) return;
   state.generatedLayer = L.polyline(allLatLngs, {
-    color: '#ff5f15', weight: 4, opacity: 0.9, interactive: false,
+    color: state.routeColor, weight: 4, opacity: 0.9, interactive: false,
   }).addTo(state.map);
+}
+
+function applyColors(state) {
+  if (state.previewLine) state.previewLine.setStyle({ color: state.previewColor });
+  if (state.generatedLayer) state.generatedLayer.setStyle({ color: state.routeColor });
+}
+
+// -------------------- initial page-load draw --------------------
+//
+// On page reload there may already be a set of waypoints AND a previously-
+// generated set of route_legs in the DB. Drawing the cached legs immediately
+// gives the user the road-snapped route on arrival — no waypoint-edit
+// required, no Valhalla call. If the cache is empty AND auto-generate is
+// on, leading-edge fires a fresh call right away.
+
+async function initialRouteDraw(state) {
+  if (state.waypoints.length < 2) return;
+  try {
+    const resp = await fetch(`/api/routes/${state.routeId}/legs`);
+    if (resp.ok) {
+      const legs = await resp.json();
+      if (legs.length > 0) {
+        drawGeneratedRoute(state, legs);
+        state.generatedVersion = state.currentVersion;  // mark fresh
+        setStatus(`Ready · cached (${legs.length} leg${legs.length > 1 ? 's' : ''})`, 'ok');
+        return;
+      }
+    }
+  } catch (_) { /* fall through */ }
+  if (state.autoGenerate) {
+    maybeFireGenerate(state);
+    ensureRenderLoop(state);
+  }
 }
 
 // -------------------- waypoint reload + change version bump --------------------
@@ -461,23 +498,71 @@ function closeMenu() {
   document.getElementById('btn-gen-dropdown').setAttribute('aria-expanded', 'false');
 }
 
+function colorsSectionHtml(state) {
+  return `
+    <div class="menu-section">
+      <div class="menu-title">Line colours</div>
+      <div class="menu-row menu-color-row">
+        <label>Route</label>
+        <input type="color" id="menu-route-color" value="${state.routeColor}">
+        <button class="menu-reset" id="menu-route-color-reset" type="button" title="Reset to default">↺</button>
+      </div>
+      <div class="menu-row menu-color-row">
+        <label>Preview</label>
+        <input type="color" id="menu-preview-color" value="${state.previewColor}">
+        <button class="menu-reset" id="menu-preview-color-reset" type="button" title="Reset to default">↺</button>
+      </div>
+    </div>`;
+}
+
+function wireColorsSection(state, menu) {
+  const routeInput = menu.querySelector('#menu-route-color');
+  const previewInput = menu.querySelector('#menu-preview-color');
+  routeInput.addEventListener('input', (e) => {
+    const c = validColor(e.target.value) || DEFAULT_ROUTE_COLOR;
+    state.routeColor = c;
+    applyColors(state);
+    savePrefs(state);
+  });
+  previewInput.addEventListener('input', (e) => {
+    const c = validColor(e.target.value) || DEFAULT_PREVIEW_COLOR;
+    state.previewColor = c;
+    applyColors(state);
+    savePrefs(state);
+  });
+  menu.querySelector('#menu-route-color-reset').addEventListener('click', () => {
+    state.routeColor = DEFAULT_ROUTE_COLOR;
+    routeInput.value = DEFAULT_ROUTE_COLOR;
+    applyColors(state);
+    savePrefs(state);
+  });
+  menu.querySelector('#menu-preview-color-reset').addEventListener('click', () => {
+    state.previewColor = DEFAULT_PREVIEW_COLOR;
+    previewInput.value = DEFAULT_PREVIEW_COLOR;
+    applyColors(state);
+    savePrefs(state);
+  });
+}
+
 function buildMenu(state) {
   const menu = document.getElementById('gen-menu');
   if (!state.autoGenerate) {
-    // Auto OFF: only option is to turn auto ON.
+    // Auto OFF: Enable-auto button + line colours.
     menu.innerHTML = `
       <div class="menu-section">
         <button class="menu-btn" id="menu-enable-auto" type="button">
           Enable auto-generate
         </button>
-        <div class="menu-hint">Auto mode regenerates after waypoint edits, waiting the debounce time before calling Valhalla.</div>
-      </div>`;
+        <div class="menu-hint">Auto mode regenerates immediately when waypoints change, then waits the debounce time before the next call.</div>
+      </div>
+      ${colorsSectionHtml(state)}`;
     menu.querySelector('#menu-enable-auto').addEventListener('click', () => {
       setAutoGenerate(state, true);
       closeMenu();
     });
+    wireColorsSection(state, menu);
   } else {
-    // Auto ON: debounce slider + immediate Generate Now.
+    // Auto ON: debounce slider + Generate Now + line colours.
     const secs = Math.round(state.debounceMs / 1000);
     menu.innerHTML = `
       <div class="menu-section">
@@ -492,7 +577,8 @@ function buildMenu(state) {
         <button class="menu-btn primary" id="menu-generate-now" type="button">
           ⚡ Generate Now (skip cooldown)
         </button>
-      </div>`;
+      </div>
+      ${colorsSectionHtml(state)}`;
     const slider = menu.querySelector('#menu-debounce-slider');
     const num = menu.querySelector('#menu-debounce-seconds');
     function setSecs(v) {
@@ -512,6 +598,7 @@ function buildMenu(state) {
       ensureRenderLoop(state);
       closeMenu();
     });
+    wireColorsSection(state, menu);
   }
 }
 
@@ -539,11 +626,19 @@ function loadPrefs(state) {
   const savedDebounce = parseInt(localStorage.getItem(STORAGE_DEBOUNCE) || '', 10);
   state.autoGenerate = savedAuto === '1';
   state.debounceMs = (Number.isFinite(savedDebounce) && savedDebounce >= 1000) ? savedDebounce : 5000;
+  state.routeColor = validColor(localStorage.getItem(STORAGE_ROUTE_COLOR))   || DEFAULT_ROUTE_COLOR;
+  state.previewColor = validColor(localStorage.getItem(STORAGE_PREVIEW_COLOR)) || DEFAULT_PREVIEW_COLOR;
 }
 
 function savePrefs(state) {
   localStorage.setItem(STORAGE_AUTO, state.autoGenerate ? '1' : '0');
   localStorage.setItem(STORAGE_DEBOUNCE, String(state.debounceMs));
+  localStorage.setItem(STORAGE_ROUTE_COLOR, state.routeColor);
+  localStorage.setItem(STORAGE_PREVIEW_COLOR, state.previewColor);
+}
+
+function validColor(v) {
+  return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v : null;
 }
 
 // -------------------- main --------------------
@@ -560,6 +655,8 @@ async function main() {
     generatedVersion: -1,
     autoGenerate: false,
     debounceMs: 5000,
+    routeColor: DEFAULT_ROUTE_COLOR,
+    previewColor: DEFAULT_PREVIEW_COLOR,
     // Cooldown / leading-edge state (trailing-edge fire happens automatically
     // when cooldownTimer expires with pendingChange=true).
     cooldownTimer: null,
@@ -589,6 +686,7 @@ async function main() {
 
   await reloadWaypoints(state, editor, { bump: false });
   fitToWaypoints(state.map, state.waypoints);
+  await initialRouteDraw(state);
 
   // --- Split-button wiring ---
   renderGenerateControl(state);
