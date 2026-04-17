@@ -16,6 +16,30 @@ async function ensureRouteId() {
   return route.id;
 }
 
+function updatePreviewLine(state) {
+  // Dashed cyan line through included waypoints in order — "here's the shape
+  // of your route before you pay Valhalla for it". Replaced by the real track
+  // on the analysis page once Generate Route lands.
+  const pts = state.waypoints
+    .filter(w => w.included !== 0 && w.lat != null && w.lon != null)
+    .map(w => [w.lat, w.lon]);
+
+  if (state.previewLine) {
+    state.map.removeLayer(state.previewLine);
+    state.previewLine = null;
+  }
+  if (pts.length < 2) return;
+  state.previewLine = L.polyline(pts, {
+    color: '#00e5ff',
+    weight: 3,
+    opacity: 0.85,
+    dashArray: '6 8',
+    interactive: false,
+  }).addTo(state.map);
+  // Keep the dashed preview below the markers so they remain clickable.
+  if (state.previewLine.bringToBack) state.previewLine.bringToBack();
+}
+
 async function reloadWaypoints(state, editor) {
   state.waypoints = await api.listWaypoints(state.routeId);
   editor.setWaypoints(state.waypoints);
@@ -34,6 +58,7 @@ async function reloadWaypoints(state, editor) {
       },
     },
   );
+  updatePreviewLine(state);
   const pinCb = document.getElementById('pin-start-cb');
   if (pinCb) {
     pinCb.checked = state.waypoints.length > 0 && state.waypoints[0].pin_role === 'start';
@@ -47,6 +72,7 @@ async function main() {
     map: null,
     waypoints: [],
     markers: [],
+    previewLine: null,
   };
 
   state.routeId = await ensureRouteId();
