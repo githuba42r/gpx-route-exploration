@@ -30,12 +30,18 @@
 /* Collapsed state — not a narrow full-height strip but a small floating
  * pill-shaped tab anchored to the right edge of the map. Clicking the
  * visible expand-arrow (◀) button restores the full panel. Driven by the
- * editor widget's onCollapseToggle (see analysis/edit-panel.js). */
+ * editor widget's onCollapseToggle (see analysis/edit-panel.js).
+ *
+ * Every rule uses !important to defeat any intervening rule (e.g. the
+ * default #edit-panel { top:0; bottom:0; } whose specificity is equal to
+ * this one — without !important the stacking order becomes source-order
+ * dependent which is fragile as bundles are reordered). */
 #edit-panel.collapsed {
-  width: 36px;
-  height: 44px;
-  top: 30%;
-  bottom: auto;
+  width: 36px !important;
+  height: 44px !important;
+  top: 30% !important;
+  bottom: auto !important;
+  left: auto !important;
   border: 1px solid #0f3460;
   border-right: none;
   border-radius: 8px 0 0 8px;
@@ -43,7 +49,7 @@
   overflow: hidden;
 }
 #edit-panel.collapsed #edit-panel-head,
-#edit-panel.collapsed #edit-panel-foot { display: none; }
+#edit-panel.collapsed #edit-panel-foot { display: none !important; }
 #edit-panel.collapsed #edit-panel-editor {
   flex: 1;
   display: flex;

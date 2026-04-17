@@ -1,7 +1,7 @@
 {% extends "_base.html" %}
 {% block title %}New Route — GPX Route Exploration{% endblock %}
 {% block css %}
-<link rel="stylesheet" href="/static/dist/create.min.css">
+<link rel="stylesheet" href="/static/dist/create.min.css?v={{ asset_version }}">
 {% endblock %}
 {% block nav_items %}
 <a href="/">&larr; Library</a>
@@ -70,5 +70,5 @@
 {% endblock %}
 {% block scripts %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/dist/create.min.js"></script>
+<script src="/static/dist/create.min.js?v={{ asset_version }}"></script>
 {% endblock %}

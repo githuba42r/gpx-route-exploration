@@ -1,6 +1,12 @@
 import os
+import time
 from flask import Flask
 from server.config import Config
+
+
+# Asset version — set at server start, appended to static CSS/JS URLs as
+# ?v=<version> so the browser can never serve stale bundles after a rebuild.
+ASSET_VERSION = str(int(time.time()))
 
 
 def create_app(config_override=None):
@@ -12,6 +18,11 @@ def create_app(config_override=None):
     app.config.from_object(Config)
     if config_override:
         app.config.update(config_override)
+
+    # Expose ASSET_VERSION to every Jinja template.
+    @app.context_processor
+    def _inject_asset_version():
+        return {"asset_version": ASSET_VERSION}
 
     # Ensure data directories exist
     data_dir = app.config["DATA_DIR"]

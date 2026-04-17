@@ -1,7 +1,7 @@
 {% extends "_base.html" %}
 {% block title %}{{ route.title }} — GPX Analysis{% endblock %}
 {% block css %}
-<link rel="stylesheet" href="/static/dist/analysis.min.css">
+<link rel="stylesheet" href="/static/dist/analysis.min.css?v={{ asset_version }}">
 {% endblock %}
 {% block body_attrs %}data-gpx-file="/api/gpx/{{ route.id }}" data-route-id="{{ route.id }}" data-has-recipe="{{ 'true' if has_recipe else 'false' }}"{% endblock %}
 {% block nav_items %}
@@ -159,5 +159,5 @@
 {% endblock %}
 {% block scripts %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/dist/analysis.min.js"></script>
+<script src="/static/dist/analysis.min.js?v={{ asset_version }}"></script>
 {% endblock %}
