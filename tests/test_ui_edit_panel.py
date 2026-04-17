@@ -120,9 +120,13 @@ def test_collapse_shrinks_panel_to_narrow_tab(page, server_url):
 
     # Click the collapse button inside the editor widget.
     page.locator(".wpe-collapse").click()
-    # Width should shrink below 50 px.
+    # The panel shrinks to a small floating tab: ≤ 50 px wide AND
+    # ≤ 80 px tall (not full viewport height as the expanded panel is).
     page.wait_for_function(
-        "() => document.getElementById('edit-panel').getBoundingClientRect().width < 50",
+        "() => {"
+        "  const b = document.getElementById('edit-panel').getBoundingClientRect();"
+        "  return b.width < 50 && b.height < 80;"
+        "}",
         timeout=2000,
     )
     # The panel's close button + regen/status foot are hidden.

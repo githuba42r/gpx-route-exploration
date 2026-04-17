@@ -27,19 +27,42 @@
 }
 #edit-panel-overlay.open #edit-panel { transform: translateX(0); }
 
-/* Collapsed state — narrow vertical tab that just shows the editor's
- * expand-arrow button. Driven by the editor widget's onCollapseToggle
- * (see analysis/edit-panel.js). The wpe-collapse button remains visible
- * inside the .wpe-collapsed widget, so the tab stays clickable. */
-#edit-panel.collapsed { width: 36px; }
-#edit-panel.collapsed #edit-panel-head strong,
-#edit-panel.collapsed #btn-close-edit,
+/* Collapsed state — not a narrow full-height strip but a small floating
+ * pill-shaped tab anchored to the right edge of the map. Clicking the
+ * visible expand-arrow (◀) button restores the full panel. Driven by the
+ * editor widget's onCollapseToggle (see analysis/edit-panel.js). */
+#edit-panel.collapsed {
+  width: 36px;
+  height: 44px;
+  top: 30%;
+  bottom: auto;
+  border: 1px solid #0f3460;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+#edit-panel.collapsed #edit-panel-head,
 #edit-panel.collapsed #edit-panel-foot { display: none; }
-#edit-panel.collapsed #edit-panel-head {
-  justify-content: center; padding: 10px 0;
+#edit-panel.collapsed #edit-panel-editor {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* Tighten the inner .wpe-collapsed widget's head so the chevron button
+ * centres cleanly inside the 36 px tab. */
+#edit-panel.collapsed .wpe-collapsed .wpe-head {
+  padding: 0;
+  justify-content: center;
   border-bottom: none;
 }
-#edit-panel.collapsed #edit-panel-editor { overflow: hidden; }
+#edit-panel.collapsed .wpe-collapse {
+  font-size: 1.2em;
+  padding: 10px 8px;
+  color: #e6edf5;
+}
 
 #edit-panel-head {
   display: flex; justify-content: space-between; align-items: center;
