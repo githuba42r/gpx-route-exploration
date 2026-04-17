@@ -26,9 +26,18 @@ export function mountWaypointEditor(container, handlers = {}) {
         <button class="wpe-collapse" title="Collapse panel" type="button">▶</button>
       </div>
       <div class="wpe-tabs">
-        <div class="wpe-tab active" data-tab="${TAB_ALL}">All<span class="wpe-count" data-count="all">(0)</span></div>
-        <div class="wpe-tab" data-tab="${TAB_STOPS}">🛑 Stops<span class="wpe-count" data-count="stops">(0)</span></div>
-        <div class="wpe-tab" data-tab="${TAB_WAYPOINTS}">◆ Waypoints<span class="wpe-count" data-count="waypoints">(0)</span></div>
+        <div class="wpe-tab active" data-tab="${TAB_ALL}"
+             title="All route points — both stops and waypoints, in visit order.">
+          All<span class="wpe-count" data-count="all">(0)</span>
+        </div>
+        <div class="wpe-tab" data-tab="${TAB_STOPS}"
+             title="Stops — locations where an extended stop is scheduled (visits, breaks, destinations). Stops carry dwell-time for ETA calculation.">
+          🛑 Stops<span class="wpe-count" data-count="stops">(0)</span>
+        </div>
+        <div class="wpe-tab" data-tab="${TAB_WAYPOINTS}"
+             title="Waypoints — transit-only points that shape the route but aren't destinations. Use to force the route along a specific path (e.g. a preferred pass or fire trail). No dwell time.">
+          ◆ WP<span class="wpe-count" data-count="waypoints">(0)</span>
+        </div>
       </div>
       <div class="wpe-totals">
         <span>Distance: <strong data-totals-distance>—</strong></span>
