@@ -21,3 +21,8 @@ def analysis(route_id):
         return redirect(url_for("pages.library"))
     touch_last_accessed(user_id, route_id)
     return render_template("analysis.html", route=route)
+
+
+@bp.route("/create")
+def create_page():
+    return render_template("create.html")
