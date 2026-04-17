@@ -15,13 +15,73 @@
 #create-header button:disabled, #create-header select:disabled { opacity:0.4; cursor:not-allowed; }
 #pin-start-label { color:#a0a0b0; font-size:0.8em; display:flex; gap:4px; align-items:center; cursor:pointer; }
 
-/* --- Generate controls group --- */
-#generate-group { display:flex; gap:6px; align-items:center; position:relative; }
-#btn-auto-toggle[data-state="on"] {
-  background:#00c851; border-color:#00c851; color:#0f1d3a;
+/* --- Generate split-button --- */
+#generate-control {
+  position:relative; display:inline-flex; border-radius:4px; overflow:hidden;
+  border:1px solid transparent;
 }
-#btn-gen-settings { padding:6px 8px; }
-#btn-generate-now { background:#e94560; border-color:#e94560; }
+#btn-gen-primary, #btn-gen-dropdown {
+  border:none; border-radius:0; padding:6px 12px; font-size:0.8em;
+  color:#e6edf5; background:#0f3460; cursor:pointer;
+  display:inline-flex; align-items:center; gap:6px;
+}
+#btn-gen-primary:disabled { cursor:not-allowed; }
+#btn-gen-dropdown { padding:6px 8px; border-left:1px solid rgba(0,0,0,0.25); }
+
+/* State colors — driven by data-variant on #generate-control */
+#generate-control[data-variant="manual"]   #btn-gen-primary,
+#generate-control[data-variant="manual"]   #btn-gen-dropdown   { background:#e94560; }
+#generate-control[data-variant="ready"]    #btn-gen-primary,
+#generate-control[data-variant="ready"]    #btn-gen-dropdown   { background:#00c851; color:#0f1d3a; }
+#generate-control[data-variant="debounce"] #btn-gen-primary,
+#generate-control[data-variant="debounce"] #btn-gen-dropdown   { background:#6a7a9a; color:#0f1d3a; }
+#generate-control[data-variant="busy"]     #btn-gen-primary,
+#generate-control[data-variant="busy"]     #btn-gen-dropdown   { background:#ff4757; color:#fff; }
+#generate-control[data-variant="rate"]     #btn-gen-primary,
+#generate-control[data-variant="rate"]     #btn-gen-dropdown   { background:#ff9f43; color:#0f1d3a; }
+#generate-control[data-variant="busy"]     #btn-gen-primary    { pointer-events:none; }
+#btn-gen-primary:hover:not(:disabled)     { filter:brightness(1.1); }
+#btn-gen-dropdown:hover                   { filter:brightness(1.1); }
+
+/* Circular countdown (SVG inside the primary button) */
+.gen-countdown { width:18px; height:18px; display:inline-block; }
+.gen-countdown svg { width:100%; height:100%; transform: rotate(-90deg); }
+.gen-countdown circle { fill:none; stroke-width:3; }
+.gen-countdown .track    { stroke: rgba(15,29,58,0.4); }
+.gen-countdown .progress {
+  stroke: #0f1d3a;
+  stroke-dasharray: 88;      /* 2*pi*14 ≈ 87.96 */
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 120ms linear;
+}
+
+/* Dropdown menu */
+#gen-menu {
+  position:absolute; z-index:1200;
+  background:#0f1d3a; border:1px solid #00c851; border-radius:6px;
+  padding:10px 14px; min-width:280px; box-shadow:0 6px 20px rgba(0,0,0,0.45);
+  font-size:0.8em; color:#e6edf5;
+}
+#gen-menu .menu-section { padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06); }
+#gen-menu .menu-section:last-child { border-bottom:none; }
+#gen-menu .menu-title { color:#a0a0b0; text-transform:uppercase; font-size:0.7em; letter-spacing:0.5px; margin-bottom:6px; }
+#gen-menu .menu-row { display:flex; align-items:center; gap:10px; }
+#gen-menu input[type="range"] { flex:1; }
+#gen-menu input[type="number"] {
+  width:50px; background:#0a152b; border:1px solid #0f3460; color:#e6edf5;
+  padding:3px 6px; border-radius:3px;
+}
+#gen-menu .menu-btn {
+  width:100%; background:#0f3460; color:#e6edf5; border:1px solid #2b3650;
+  padding:6px 10px; border-radius:4px; cursor:pointer; font-size:0.85em;
+  text-align:left;
+}
+#gen-menu .menu-btn:hover { background:#1a4a80; }
+#gen-menu .menu-btn.primary { background:#e94560; border-color:#e94560; }
+#gen-menu .menu-btn:disabled { opacity:0.5; cursor:not-allowed; }
+#gen-menu .menu-hint { color:#6a7a9a; font-size:0.72em; line-height:1.4; margin-top:6px; }
+
+/* Status chip (secondary indicator) */
 #generate-status {
   font-size:0.75em; margin-left:6px; padding:3px 8px; border-radius:3px;
   font-family: ui-monospace, monospace;
@@ -32,21 +92,6 @@
 .gen-status-ok      { color:#00c851; background:rgba(0,200,81,0.12); }
 .gen-status-err     { color:#ff4757; background:rgba(255,71,87,0.12); }
 .gen-status-rate    { color:#ff9f43; background:rgba(255,159,67,0.12); }
-
-#gen-settings-popover {
-  position:absolute; right:110px; top:50px; z-index:1200;
-  background:#0f1d3a; border:1px solid #00c851; border-radius:6px;
-  padding:12px 14px; min-width:260px; box-shadow:0 6px 20px rgba(0,0,0,0.45);
-  font-size:0.8em;
-}
-#gen-settings-popover .popover-title { color:#a0a0b0; text-transform:uppercase; font-size:0.7em; letter-spacing:0.5px; margin-bottom:8px; }
-#gen-settings-popover .popover-body { display:flex; gap:10px; align-items:center; }
-#gen-settings-popover .popover-body input[type="range"] { flex:1; }
-#gen-settings-popover .popover-body input[type="number"] {
-  width:54px; background:#0a152b; border:1px solid #0f3460; color:#e6edf5;
-  padding:3px 6px; border-radius:3px;
-}
-#gen-settings-popover .popover-hint { color:#6a7a9a; font-size:0.72em; margin-top:8px; line-height:1.4; }
 
 /* --- Error panel --- */
 #generate-error {

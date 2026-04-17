@@ -113,7 +113,11 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
 
 async function onWaypointsChanged(state, editor) {
   await reloadWaypoints(state, editor);
-  if (state.autoGenerate) scheduleGenerate(state);
+  if (state.autoGenerate) {
+    scheduleGenerate(state);
+    ensureRenderLoop(state);
+  }
+  renderGenerateControl(state);
 }
 
 // -------------------- generate state machine --------------------
@@ -148,22 +152,55 @@ function escapeHtml(s) {
 function scheduleGenerate(state) {
   if (state.pendingTimer) clearTimeout(state.pendingTimer);
   const delay = Math.max(0, state.debounceMs);
+  state.pendingStartedAt = Date.now();
+  state.pendingDeadline = state.pendingStartedAt + delay;
   setStatus(`Pending (${(delay / 1000).toFixed(1)}s)`, 'pending');
-  state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, delay);
+  state.pendingTimer = setTimeout(() => {
+    state.pendingTimer = null;
+    state.pendingStartedAt = null;
+    state.pendingDeadline = null;
+    tryGenerate(state);
+  }, delay);
+  renderGenerateControl(state);
+}
+
+function cancelPending(state) {
+  if (state.pendingTimer) {
+    clearTimeout(state.pendingTimer);
+    state.pendingTimer = null;
+    state.pendingStartedAt = null;
+    state.pendingDeadline = null;
+  }
 }
 
 async function tryGenerate(state) {
   if (state.isGenerating) {
     // Someone's mid-flight. Reschedule a small nudge ahead.
-    state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, 500);
+    state.pendingStartedAt = Date.now();
+    state.pendingDeadline = state.pendingStartedAt + 500;
+    state.pendingTimer = setTimeout(() => {
+      state.pendingTimer = null;
+      state.pendingStartedAt = null;
+      state.pendingDeadline = null;
+      tryGenerate(state);
+    }, 500);
     setStatus('Pending (in-flight)', 'pending');
+    renderGenerateControl(state);
     return;
   }
   const elapsed = Date.now() - state.lastGenerateAt;
   if (elapsed < GLOBAL_RATE_LIMIT_MS) {
     const wait = GLOBAL_RATE_LIMIT_MS - elapsed;
+    state.pendingStartedAt = Date.now();
+    state.pendingDeadline = state.pendingStartedAt + wait;
     setStatus(`Rate-limited (${Math.ceil(wait / 1000)}s)`, 'rate');
-    state.pendingTimer = setTimeout(() => { state.pendingTimer = null; tryGenerate(state); }, wait);
+    state.pendingTimer = setTimeout(() => {
+      state.pendingTimer = null;
+      state.pendingStartedAt = null;
+      state.pendingDeadline = null;
+      tryGenerate(state);
+    }, wait);
+    renderGenerateControl(state);
     return;
   }
   await doGenerate(state);
@@ -178,6 +215,7 @@ async function doGenerate(state) {
   const version = state.currentVersion;
   setStatus('Generating…', 'busy');
   clearError();
+  renderGenerateControl(state);
   try {
     const endpoint = `/api/routes/${state.routeId}/generate`;
     const resp = await fetch(endpoint, { method: 'POST' });
@@ -219,7 +257,179 @@ async function doGenerate(state) {
     setStatus('Network error', 'err');
   } finally {
     state.isGenerating = false;
+    renderGenerateControl(state);
   }
+}
+
+// -------------------- split-button render --------------------
+//
+// Visual states of #generate-control (data-variant):
+//   manual   — auto OFF. Button is "⚡ Generate Now". Default orange/red.
+//   ready    — auto ON, nothing pending. Green. Label "Auto-gen ready".
+//   debounce — auto ON, pending timer running. Grey with circular countdown.
+//   rate     — rate-limited waiting. Amber with countdown.
+//   busy     — /generate call in flight. Red, primary disabled.
+//
+// Countdown circle: SVG circle with stroke-dasharray 88 (≈ 2π·14); we animate
+// stroke-dashoffset from 0 (full) to 88 (empty) as the deadline approaches.
+
+function renderGenerateControl(state) {
+  const ctrl = document.getElementById('generate-control');
+  const primary = document.getElementById('btn-gen-primary');
+  const icon = document.getElementById('gen-primary-icon');
+  const label = document.getElementById('gen-primary-label');
+  const countdownWrap = document.getElementById('gen-primary-countdown');
+  const progress = countdownWrap.querySelector('circle.progress');
+
+  let variant, iconText, labelText, disabled = false, showCountdown = false;
+
+  if (state.isGenerating) {
+    variant = 'busy'; iconText = '⏳'; labelText = 'Generating…'; disabled = true;
+  } else if (state.autoGenerate && state.pendingTimer) {
+    variant = (state.lastGenerateAt && Date.now() - state.lastGenerateAt < GLOBAL_RATE_LIMIT_MS)
+      ? 'rate' : 'debounce';
+    iconText = '';
+    const remaining = Math.max(0, (state.pendingDeadline || 0) - Date.now());
+    labelText = `${(remaining / 1000).toFixed(1)}s`;
+    showCountdown = true;
+  } else if (state.autoGenerate) {
+    variant = 'ready'; iconText = '✓'; labelText = 'Auto-gen ready';
+  } else {
+    variant = 'manual'; iconText = '⚡'; labelText = 'Generate Now';
+  }
+
+  ctrl.dataset.variant = variant;
+  icon.textContent = iconText;
+  icon.style.display = iconText ? '' : 'none';
+  label.textContent = labelText;
+  countdownWrap.style.display = showCountdown ? 'inline-block' : 'none';
+  primary.disabled = disabled;
+
+  if (showCountdown && state.pendingStartedAt != null && state.pendingDeadline != null) {
+    const total = Math.max(1, state.pendingDeadline - state.pendingStartedAt);
+    const remaining = Math.max(0, state.pendingDeadline - Date.now());
+    const progressPct = 1 - remaining / total; // 0→1 as timer runs out
+    const CIRCUM = 88;
+    progress.style.strokeDashoffset = String(progressPct * CIRCUM);
+  } else {
+    progress.style.strokeDashoffset = '0';
+  }
+
+  // Title tooltips convey the action that clicking the primary will take.
+  primary.title = {
+    manual: 'Generate the route now',
+    ready: 'Click to disable auto-generate',
+    debounce: 'Click to disable auto-generate (or pick Generate Now from the menu)',
+    rate: 'Rate-limited — click to disable auto-generate',
+    busy: 'Generating…',
+  }[variant] || '';
+}
+
+function startRenderLoop(state) {
+  // Refresh button + countdown every 150 ms while a timer is pending.
+  // Cheap; the function is no-op when nothing's pending.
+  if (state.renderLoopActive) return;
+  state.renderLoopActive = true;
+  const tick = () => {
+    renderGenerateControl(state);
+    if (state.pendingTimer || state.isGenerating) {
+      state.renderTimer = setTimeout(tick, 150);
+    } else {
+      state.renderLoopActive = false;
+      state.renderTimer = null;
+    }
+  };
+  tick();
+}
+
+function ensureRenderLoop(state) {
+  if ((state.pendingTimer || state.isGenerating) && !state.renderLoopActive) {
+    startRenderLoop(state);
+  }
+}
+
+// -------------------- dropdown menu --------------------
+
+function openMenu(state) {
+  const menu = document.getElementById('gen-menu');
+  const ctrl = document.getElementById('generate-control');
+  buildMenu(state);
+  menu.style.display = 'block';
+  const rect = ctrl.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.right - menu.offsetWidth}px`;
+  document.getElementById('btn-gen-dropdown').setAttribute('aria-expanded', 'true');
+}
+
+function closeMenu() {
+  const menu = document.getElementById('gen-menu');
+  menu.style.display = 'none';
+  document.getElementById('btn-gen-dropdown').setAttribute('aria-expanded', 'false');
+}
+
+function buildMenu(state) {
+  const menu = document.getElementById('gen-menu');
+  if (!state.autoGenerate) {
+    // Auto OFF: only option is to turn auto ON.
+    menu.innerHTML = `
+      <div class="menu-section">
+        <button class="menu-btn" id="menu-enable-auto" type="button">
+          Enable auto-generate
+        </button>
+        <div class="menu-hint">Auto mode regenerates after waypoint edits, waiting the debounce time before calling Valhalla.</div>
+      </div>`;
+    menu.querySelector('#menu-enable-auto').addEventListener('click', () => {
+      setAutoGenerate(state, true);
+      closeMenu();
+    });
+  } else {
+    // Auto ON: debounce slider + immediate Generate Now.
+    const secs = Math.round(state.debounceMs / 1000);
+    menu.innerHTML = `
+      <div class="menu-section">
+        <div class="menu-title">Debounce delay</div>
+        <div class="menu-row">
+          <input type="range" id="menu-debounce-slider" min="1" max="30" step="1" value="${secs}">
+          <input type="number" id="menu-debounce-seconds" min="1" max="30" value="${secs}"> sec
+        </div>
+        <div class="menu-hint">Max 1 generate call per ${GLOBAL_RATE_LIMIT_MS / 1000} s globally.</div>
+      </div>
+      <div class="menu-section">
+        <button class="menu-btn primary" id="menu-generate-now" type="button">
+          ⚡ Generate Now (skip debounce)
+        </button>
+      </div>`;
+    const slider = menu.querySelector('#menu-debounce-slider');
+    const num = menu.querySelector('#menu-debounce-seconds');
+    function setSecs(v) {
+      v = Math.max(1, Math.min(30, parseInt(v, 10) || 5));
+      state.debounceMs = v * 1000;
+      slider.value = String(v);
+      num.value = String(v);
+      savePrefs(state);
+    }
+    slider.addEventListener('input', (e) => setSecs(e.target.value));
+    num.addEventListener('change', (e) => setSecs(e.target.value));
+    menu.querySelector('#menu-generate-now').addEventListener('click', () => {
+      cancelPending(state);
+      tryGenerate(state);
+      ensureRenderLoop(state);
+      closeMenu();
+    });
+  }
+}
+
+function setAutoGenerate(state, value) {
+  state.autoGenerate = value;
+  savePrefs(state);
+  if (!value) {
+    cancelPending(state);
+    setStatus('Idle', 'idle');
+  } else if (state.waypoints.length >= 2) {
+    scheduleGenerate(state);
+    ensureRenderLoop(state);
+  }
+  renderGenerateControl(state);
 }
 
 // -------------------- settings persistence --------------------
@@ -234,24 +444,6 @@ function loadPrefs(state) {
 function savePrefs(state) {
   localStorage.setItem(STORAGE_AUTO, state.autoGenerate ? '1' : '0');
   localStorage.setItem(STORAGE_DEBOUNCE, String(state.debounceMs));
-}
-
-function reflectAutoToggle(state) {
-  const btn = document.getElementById('btn-auto-toggle');
-  const gearBtn = document.getElementById('btn-gen-settings');
-  const nowBtn = document.getElementById('btn-generate-now');
-  btn.dataset.state = state.autoGenerate ? 'on' : 'off';
-  btn.textContent = state.autoGenerate ? 'Auto-generate: ON' : 'Auto-generate: OFF';
-  gearBtn.style.display = state.autoGenerate ? '' : 'none';
-  // Generate Now is always available — even when auto is on you might want to
-  // force an immediate call without waiting for debounce.
-  nowBtn.style.display = '';
-}
-
-function reflectDebounce(state) {
-  const secs = Math.round(state.debounceMs / 1000);
-  document.getElementById('debounce-slider').value = String(secs);
-  document.getElementById('debounce-seconds').value = String(secs);
 }
 
 // -------------------- main --------------------
@@ -294,49 +486,38 @@ async function main() {
   await reloadWaypoints(state, editor, { bump: false });
   fitToWaypoints(state.map, state.waypoints);
 
-  // --- Auto-generate controls ---
-  reflectAutoToggle(state);
-  reflectDebounce(state);
+  // --- Split-button wiring ---
+  renderGenerateControl(state);
 
-  document.getElementById('btn-auto-toggle').addEventListener('click', () => {
-    state.autoGenerate = !state.autoGenerate;
-    savePrefs(state);
-    reflectAutoToggle(state);
+  // Primary button: action depends on current variant.
+  //   - manual  → Generate Now (cancel any pending, trigger immediate)
+  //   - ready / debounce / rate → turn auto OFF
+  //   - busy    → disabled (no-op)
+  document.getElementById('btn-gen-primary').addEventListener('click', () => {
+    if (state.isGenerating) return;
     if (state.autoGenerate) {
-      scheduleGenerate(state);
+      setAutoGenerate(state, false);
     } else {
-      if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
-      setStatus('Idle', 'idle');
-      document.getElementById('gen-settings-popover').style.display = 'none';
+      cancelPending(state);
+      tryGenerate(state);
+      ensureRenderLoop(state);
     }
   });
 
-  const popover = document.getElementById('gen-settings-popover');
-  document.getElementById('btn-gen-settings').addEventListener('click', (e) => {
+  // Dropdown arrow toggles the menu.
+  document.getElementById('btn-gen-dropdown').addEventListener('click', (e) => {
     e.stopPropagation();
-    popover.style.display = popover.style.display === 'none' ? 'block' : 'none';
+    const menu = document.getElementById('gen-menu');
+    if (menu.style.display === 'none' || !menu.style.display) openMenu(state);
+    else closeMenu();
   });
   document.addEventListener('click', (e) => {
-    if (!popover.contains(e.target) && e.target.id !== 'btn-gen-settings') {
-      popover.style.display = 'none';
+    const menu = document.getElementById('gen-menu');
+    if (menu.style.display === 'block'
+        && !menu.contains(e.target)
+        && e.target.id !== 'btn-gen-dropdown') {
+      closeMenu();
     }
-  });
-
-  const slider = document.getElementById('debounce-slider');
-  const numInput = document.getElementById('debounce-seconds');
-  function setDebounceSecs(secs) {
-    secs = Math.max(1, Math.min(30, parseInt(secs, 10) || 5));
-    state.debounceMs = secs * 1000;
-    slider.value = String(secs);
-    numInput.value = String(secs);
-    savePrefs(state);
-  }
-  slider.addEventListener('input', (e) => setDebounceSecs(e.target.value));
-  numInput.addEventListener('change', (e) => setDebounceSecs(e.target.value));
-
-  document.getElementById('btn-generate-now').addEventListener('click', () => {
-    if (state.pendingTimer) { clearTimeout(state.pendingTimer); state.pendingTimer = null; }
-    tryGenerate(state);
   });
 
   // --- Map click → append waypoint ---

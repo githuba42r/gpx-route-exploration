@@ -20,21 +20,25 @@
   </label>
   <button id="btn-optimise" type="button" disabled title="Optimisation ships in M3">Optimise</button>
 
-  <!-- Generate controls: auto-toggle + (when on) settings ⚙, + manual Generate Now, + status. -->
-  <div id="generate-group">
-    <button id="btn-auto-toggle" type="button" data-state="off" title="Click to enable automatic regeneration on each edit">Auto-generate: OFF</button>
-    <button id="btn-gen-settings" type="button" title="Debounce settings" style="display:none;">⚙</button>
-    <button id="btn-generate-now" type="button">Generate Now</button>
-    <span id="generate-status" class="gen-status-idle">Idle</span>
+  <!-- Single split-button for everything Generate-related. The primary
+       button's appearance changes with state (manual / ready / debounce /
+       busy / rate). The dropdown arrow opens a context-appropriate menu. -->
+  <div id="generate-control" data-variant="manual">
+    <button id="btn-gen-primary" type="button" title="Generate Now">
+      <span id="gen-primary-countdown" class="gen-countdown" aria-hidden="true" style="display:none;">
+        <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" class="track"/><circle cx="16" cy="16" r="14" class="progress"/></svg>
+      </span>
+      <span id="gen-primary-icon">⚡</span>
+      <span id="gen-primary-label">Generate Now</span>
+    </button>
+    <button id="btn-gen-dropdown" type="button" aria-haspopup="true" aria-expanded="false" title="Options">▾</button>
   </div>
-  <div id="gen-settings-popover" style="display:none;">
-    <div class="popover-title">Debounce delay</div>
-    <div class="popover-body">
-      <input type="range" id="debounce-slider" min="1" max="30" step="1" value="5">
-      <input type="number" id="debounce-seconds" min="1" max="30" value="5"> sec
-    </div>
-    <div class="popover-hint">Generate calls are also rate-limited to at most one per 5 s globally.</div>
+
+  <div id="gen-menu" style="display:none;" role="menu">
+    <!-- Content built dynamically by app.js based on autoGenerate state -->
   </div>
+
+  <span id="generate-status" class="gen-status-idle" aria-live="polite">Idle</span>
 
   <button id="btn-save" type="button">Save</button>
 </div>
