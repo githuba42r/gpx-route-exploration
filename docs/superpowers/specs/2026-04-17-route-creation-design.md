@@ -12,10 +12,12 @@
 Turn the GPX analysis tool into a general-purpose route tool that also **creates** and **edits** routes, not just analyses imported GPX files. Users gain three creation entry points, all of which converge on the existing analysis page:
 
 - **Mode A — upload GPX** *(existing)*: drop a `.gpx` file, analyse. If the file contains `<wpt>` entries, they become the route's recipe.
-- **Mode B — upload CSV**: addresses and/or GPS coordinates become a recipe. Addresses are geocoded via the existing Nominatim proxy; GPS columns bypass geocoding. A Valhalla routing call produces the detailed track.
+- **Mode B — upload CSV**: addresses and/or GPS coordinates. CSV upload is available **at any time** — as a starting point for a new route, or as an append-to-existing-route action from within the Create page or the Analysis edit panel. Addresses are geocoded via the existing Nominatim proxy; GPS columns bypass geocoding. A Valhalla routing call produces the detailed track.
 - **Mode C — click waypoints on a map**: manual drop of stops and waypoints on a Leaflet map.
 
 All three modes produce the same artifact: a **route with a recipe**. The recipe holds the list of stops and waypoints, the routing options, and per-leg travel info. The detailed GPX (hundreds–thousands of trackpoints from Valhalla) is stored alongside so analysis works anywhere. Recipe-less routes (Mode A without `<wpt>`) remain analysable but are read-only until M6 when a lossy "extract waypoints" heuristic is added.
+
+Modes B and C are not exclusive — any combination is valid. You can start a route by clicking three waypoints on the map, then upload a CSV to append ten cafés as stops, then drag-reorder the lot.
 
 ## 2. Core concepts
 
@@ -98,19 +100,29 @@ Reuse the existing proxy endpoints and config values (`VALHALLA_URL`, `NOMINATIM
 
 ### Data flow — CSV import (M5)
 
-```
-Browser → POST /api/geocode/csv   (multipart: file + column map)
-      ← 202 { job_id, route_id }
+CSV upload has two modes, distinguished by whether a `route_id` is supplied:
 
+**New-route mode** (from Library):
+```
+Browser → POST /api/geocode/csv           (multipart: file + column map)
+      ← 202 { job_id, route_id }          — server created a new empty route
 Browser → GET  /api/geocode/csv/<job_id>/stream   (SSE)
-      ← event: row   { index, status: "geocoded", lat, lon }
-      ← event: row   { index, status: "failed", error }
-      ← event: done  { route_id, created: 12, failed: 2 }
-
-Browser → navigate to /route/<route_id>?edit=1 → Analysis page opens with edit panel expanded
+      ← event: row  { index, status: "geocoded", lat, lon }
+      ← event: done { route_id, created: 12, failed: 2 }
+Browser → navigate to /route/<route_id>?edit=1
 ```
 
-On the server side, the SSE handler writes each geocoded row into `route_waypoints` as it resolves; the browser redirects only after the `done` event. Failed rows are kept in the waypoints table with `lat=NULL, lon=NULL, included=0` and a note in `description`; the user can fix them manually.
+**Append mode** (from Create page or Analysis edit panel):
+```
+Browser → POST /api/geocode/csv?route_id=<id>&append=1   (multipart: file + column map)
+      ← 202 { job_id, route_id: <same id>, append: true }
+Browser → GET  /api/geocode/csv/<job_id>/stream   (SSE)
+      ← event: row  { index, status: "geocoded", lat, lon, waypoint_id }
+      ← event: done { route_id, appended: 12, failed: 2 }
+Browser → stays on current page; editor reloads the waypoint list when `done` arrives
+```
+
+On the server side, rows are written into `route_waypoints` as each geocodes: `position` is assigned starting at the current max (append) or from 0 (new-route). **All CSV-imported rows default to `kind = 'stop'`** (the user explicitly called these a "CSV of stops") with `included = 1`. Failed rows are kept with `lat=NULL, lon=NULL, included=0` and a note in `description`; the user can fix them manually.
 
 ### Persistent geocoding cache
 
@@ -217,15 +229,18 @@ Each milestone ends with unit tests (pytest) + UI tests (Playwright) + manual ve
 - Profile picker live (bicycle / walking / auto aka car); switching profile invalidates cached `route_legs` and requires regeneration.
 - Round-trip toggle: if on, Valhalla request appends a return leg from last→first stop.
 - Start/end pin checkboxes (per-waypoint in the editor; also a quick pin-as-start on hover).
-- Include/exclude toggle per waypoint — excluded waypoints persist in the recipe but don't participate in routing.
+- **Include/exclude** per waypoint — excluded waypoints persist in the recipe but don't participate in routing (and don't appear on the detailed GPX track). Accessed two ways:
+    1. A toggle control on each sidebar list item (eye / eye-slash icon), with the row dimmed when excluded.
+    2. A "Include" / "Exclude" entry in the right-click context menu on the map marker.
 - "Optimise" button runs nearest-neighbour initialisation + 2-opt local search on included waypoints, respecting pins.
 - New API: `POST /api/routes/<id>/optimise` returns `{ new_order: [waypoint_id, ...] }`.
 
 **Acceptance:**
 - Toggle walking profile → existing route invalidated → Regenerate → different GPX (flatter, different path).
+- Exclude a waypoint via the list toggle, Regenerate → route skips it. Right-click the excluded marker → re-include via context menu.
 - Pin first stop, click Optimise → order changes but pinned stop stays at index 0.
 - Unit: `test_optimiser.py` with synthetic point sets (include a 2-opt-reducible case).
-- UI: `test_ui_options.py` — profile switch invalidates legs; optimise reorders; pin honoured.
+- UI: `test_ui_options.py` — profile switch invalidates legs; optimise reorders; pin honoured; include toggle works from list and from context menu.
 
 ### M4 — Rich GPX export / import
 
@@ -239,26 +254,32 @@ Each milestone ends with unit tests (pytest) + UI tests (Playwright) + manual ve
 - Re-import the exported file → new route has identical recipe (waypoints list matches by lat/lon to 6 dp, kinds match).
 - Unit: `test_gpx_roundtrip.py`.
 
-### M5 — CSV upload (Mode B)
+### M5 — CSV upload (Mode B) — new-route *and* append-to-existing
 
 **Ships:**
-- "Upload CSV" button on Library page and Create page.
+- "Upload CSV" button available from **three** places:
+    1. Library page → creates a **new route**.
+    2. Create Route page → **appends** to the in-progress route (useful after manually dropping a start/end and then bulk-adding cafés).
+    3. Analysis page edit panel → **appends** to the saved route.
 - Client: parse CSV locally (PapaParse), show column-mapping dialog, let user choose which column maps to each field (`name`, `address`, `lat`, `lon`, `description`).
-- POST to `/api/geocode/csv` with the file + mapping; server creates a new route and returns `{ job_id, route_id }`.
-- Server worker thread: for each row, lat/lon direct if present, else Nominatim lookup (with cache). Rate-limited 1 req/s per Nominatim convention.
-- SSE stream `/api/geocode/csv/<job_id>/stream` emits per-row progress. On completion, client navigates to `/route/<id>?edit=1`.
+- POST to `/api/geocode/csv` with the file + mapping. If a `route_id` is in the query string, server appends (does NOT create). Otherwise it creates a new route and returns `{ job_id, route_id }`.
+- Imported rows default to `kind='stop'`, `included=1`, and are placed at the end of the recipe in CSV row order.
+- Server worker thread: for each row, lat/lon direct if present, else Nominatim lookup (with cache). Rate-limited 1 req/s per Nominatim convention (configurable via `NOMINATIM_RATE_LIMIT_MS`).
+- SSE stream `/api/geocode/csv/<job_id>/stream` emits per-row progress. On completion the client either navigates to `/route/<id>?edit=1` (new-route mode) or reloads the waypoint list in place (append mode).
 
 **Acceptance:**
-- Upload CSV of 10 rows (mix of addresses and GPS) → progress bar updates row-by-row → lands on analysis page with edit panel expanded, all 10 rows visible.
-- Failed rows (bad address) show as `included=0` with a note.
-- Unit: `test_api_geocode.py` (Nominatim mocked), `test_csv_import.py` (column mapping).
-- UI: `test_ui_csv_upload.py`.
+- **New-route:** upload CSV of 10 rows (mix of addresses and GPS) from Library → progress bar updates row-by-row → lands on analysis page with edit panel expanded, all 10 rows visible as stops.
+- **Append to Create page:** start a route with 2 manual waypoints, upload CSV of 5 rows → editor ends up showing 7 entries; the Valhalla "Generate" button becomes clickable only once all 7 have lat/lon.
+- **Append to Analysis:** open existing 4-stop route, upload CSV of 3 rows → list now shows 7 entries without leaving the page; Regenerate integrates the new stops into the drawn track.
+- Failed rows (bad address) show as `included=0` with an error note in `description`; row is visible in the list so the user can fix or delete.
+- Unit: `test_api_geocode.py` (Nominatim mocked, both new-route and append paths), `test_csv_import.py` (column mapping).
+- UI: `test_ui_csv_upload.py` — covers all three entry points.
 
 ### M6 — Polish
 
 **Ships:**
 - Address autocomplete on manual "Add by address…" (uses `/api/geocode/search`).
-- Right-click context menu on map waypoint markers: "Mark as Stop", "Pin as Start", "Exclude", "Remove".
+- Right-click context menu on map waypoint markers expanded from its M3 "Include/Exclude" version to also include: "Mark as Stop" / "Mark as Waypoint", "Pin as Start" / "Pin as End", "Remove from route".
 - Loading indicators on Valhalla and geocoding calls.
 - "Convert to recipe" button on GPX-only routes: extracts N evenly-spaced points (default 6) from the trackpoints as waypoints — explicitly labelled as lossy.
 - Waypoint icon visual fix: replace CSS `rotate(45deg)` with a `clip-path` diamond so icon bounds stay inside their 26 px slot and the "Waypoint" label no longer wraps.
