@@ -826,8 +826,18 @@ async function main() {
       // Collapse the whole sidebar, not just the widget inside — otherwise
       // the aside stays at 340 px and the map keeps a dark dead strip on
       // its right edge.
+      //
+      // After the DOM resize, Leaflet needs a nudge (invalidateSize) to
+      // realise its container grew/shrank and load tiles for the newly-
+      // uncovered area. Without this the user sees the map's #16213e
+      // background showing through — which is exactly the "large dark
+      // blue area" a user reported on the narrow viewport.
       onCollapseToggle: (isCollapsed) => {
         document.getElementById('editor-panel').classList.toggle('collapsed', isCollapsed);
+        if (state.map) {
+          // Match the 200 ms CSS transition so tiles fetch with the final size.
+          setTimeout(() => state.map.invalidateSize(), 220);
+        }
       },
     },
   );

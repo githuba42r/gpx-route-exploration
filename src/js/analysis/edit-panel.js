@@ -211,8 +211,11 @@ export function initEditPanel({ map, routeId }) {
     },
     // When the widget's ▶/◀ collapse button flips, shrink the whole
     // panel to a ~32 px vertical tab so the map gets its width back.
+    // Leaflet also needs a nudge so it fetches tiles for the newly-
+    // uncovered area instead of showing its own #16213e background.
     onCollapseToggle: (isCollapsed) => {
       document.getElementById('edit-panel').classList.toggle('collapsed', isCollapsed);
+      setTimeout(() => map.invalidateSize(), 220);
     },
   });
 
