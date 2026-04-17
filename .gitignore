@@ -11,3 +11,6 @@ data/
 .env
 .env.*
 !.env.example
+
+# Brainstorm mockups (visual companion)
+.superpowers/

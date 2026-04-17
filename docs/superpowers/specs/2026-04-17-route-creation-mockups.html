@@ -1,0 +1,427 @@
+<style>
+  .mk-header { background:#16213e; border-bottom:2px solid #0f3460; padding:10px 16px; display:flex; gap:12px; align-items:center; font-size:0.85em; }
+  .mk-nav-link { color:#a0a0b0; text-decoration:none; }
+  .mk-title-input { background:#0f1d3a; border:1px solid #0f3460; color:#e6edf5; padding:6px 10px; border-radius:4px; font-size:0.9em; min-width:260px; }
+  .mk-select { background:#0f1d3a; border:1px solid #0f3460; color:#e6edf5; padding:6px 10px; border-radius:4px; font-size:0.85em; }
+  .mk-layout { display:flex; height:520px; border-top:1px solid #0f3460; }
+  .mk-map {
+    flex:1; background:
+      repeating-linear-gradient(0deg, #1a2a4a 0px, #1a2a4a 1px, transparent 1px, transparent 40px),
+      repeating-linear-gradient(90deg, #1a2a4a 0px, #1a2a4a 1px, transparent 1px, transparent 40px),
+      #16213e;
+    position:relative;
+  }
+  .mk-route-preview { stroke:#00e5ff; stroke-width:3; stroke-dasharray:6 6; fill:none; }
+  .mk-route-real { stroke:#e94560; stroke-width:3; fill:none; }
+
+  /* Map pins — octagon for stops, diamond for waypoints */
+  .mk-pin { position:absolute; transform:translate(-50%,-50%); }
+  .mk-stop-pin {
+    width:30px; height:30px;
+    background:#ff4757;
+    clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:0.75em; font-weight:700; border:2px solid #fff;
+    box-shadow:0 2px 4px rgba(0,0,0,0.5);
+  }
+  .mk-wpt-pin {
+    width:20px; height:20px;
+    background:#00e5ff;
+    transform:translate(-50%,-50%) rotate(45deg);
+    border:2px solid #fff;
+    position:absolute;
+    box-shadow:0 2px 4px rgba(0,0,0,0.5);
+  }
+  .mk-wpt-pin-num {
+    position:absolute;
+    transform:translate(-50%,-50%);
+    color:#fff; font-size:0.7em; font-weight:700;
+    pointer-events:none;
+  }
+  .mk-start-halo { position:absolute; width:40px; height:40px; border:2px dashed #00e676; border-radius:50%; transform:translate(-50%,-50%); }
+  .mk-end-halo { position:absolute; width:40px; height:40px; border:2px dashed #ff5f15; border-radius:50%; transform:translate(-50%,-50%); }
+
+  .mk-sidebar { width:340px; background:#0f1d3a; border-left:1px solid #0f3460; display:flex; flex-direction:column; position:relative; }
+  .mk-collapsed-tab {
+    position:absolute; left:-24px; top:40%;
+    width:24px; height:72px;
+    background:#0f3460; border:1px solid #2b3650; border-right:none;
+    border-radius:4px 0 0 4px; color:#a0a0b0;
+    display:flex; align-items:center; justify-content:center;
+    writing-mode:vertical-rl; transform:rotate(180deg);
+    font-size:0.75em; letter-spacing:1px; cursor:pointer;
+  }
+  .mk-collapsed-tab:hover { background:#1a4a80; color:#e6edf5; }
+
+  .mk-sb-head { padding:10px 14px; border-bottom:1px solid #0f3460; display:flex; justify-content:space-between; align-items:center; font-size:0.85em; }
+  .mk-collapse-btn { background:transparent; border:none; color:#a0a0b0; cursor:pointer; font-size:1em; }
+
+  .mk-tabs { display:flex; border-bottom:1px solid #0f3460; background:#0a152b; font-size:0.8em; }
+  .mk-tab { padding:8px 12px; color:#a0a0b0; cursor:pointer; border-bottom:2px solid transparent; flex:1; text-align:center; }
+  .mk-tab.active { color:#e6edf5; border-bottom-color:#e94560; background:#0f1d3a; }
+  .mk-tab-count { color:#6a7a9a; font-size:0.9em; margin-left:4px; }
+
+  .mk-options-row { display:flex; gap:8px; font-size:0.75em; color:#a0a0b0; padding:6px 12px; border-bottom:1px solid #0f3460; background:#0a152b; flex-wrap:wrap; }
+  .mk-options-row label { display:flex; gap:4px; align-items:center; }
+
+  .mk-sb-body { flex:1; overflow:auto; padding:4px 0; }
+
+  /* List item — stop vs waypoint */
+  .mk-stop {
+    display:flex; align-items:center; gap:8px; padding:10px 12px;
+    border-left:3px solid transparent; font-size:0.85em;
+    background:transparent;
+  }
+  .mk-stop.is-stop { border-left-color:#ff4757; }
+  .mk-stop.is-wpt  { border-left-color:#00e5ff; }
+  .mk-stop:hover { background:#16213e; }
+  .mk-handle { color:#6a7a9a; cursor:grab; font-size:1.2em; }
+  .mk-kind-icon {
+    width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center;
+    color:#fff; font-size:0.75em; font-weight:700; flex-shrink:0;
+    position:relative;
+  }
+  .mk-kind-icon.stop {
+    background:#ff4757;
+    clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+  }
+  .mk-kind-icon.wpt {
+    background:#00e5ff;
+    transform:rotate(45deg);
+    color:#0f1d3a;
+  }
+  .mk-kind-icon.wpt span { transform:rotate(-45deg); font-weight:700; }
+
+  .mk-stop-body { flex:1; min-width:0; }
+  .mk-stop-name { color:#e6edf5; display:flex; gap:6px; align-items:center; }
+  .mk-badge { background:#0f3460; color:#a0a0b0; font-size:0.65em; padding:1px 6px; border-radius:8px; text-transform:uppercase; }
+  .mk-badge.stop { background:#ff4757; color:#fff; }
+  .mk-badge.wpt { background:#00e5ff; color:#0f1d3a; }
+  .mk-stop-sub { color:#6a7a9a; font-size:0.75em; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .mk-stop-dwell { color:#ff9f43; font-size:0.7em; background:rgba(255,159,67,0.1); padding:2px 6px; border-radius:3px; border:1px solid rgba(255,159,67,0.3); }
+
+  .mk-iconbtn { background:transparent; border:none; color:#6a7a9a; cursor:pointer; font-size:0.9em; padding:2px 4px; }
+  .mk-iconbtn:hover { color:#e6edf5; }
+
+  /* Leg time row between items */
+  .mk-leg {
+    font-size:0.7em; color:#a0a0b0; padding:3px 12px 3px 52px;
+    display:flex; gap:8px; align-items:center;
+    border-left:3px dashed #2b3650; margin-left:0;
+  }
+  .mk-leg-icon { opacity:0.7; }
+  .mk-leg-warn { color:#ff9f43; }
+
+  .mk-sb-footer { padding:10px 12px; border-top:1px solid #0f3460; display:flex; flex-direction:column; gap:6px; }
+  .mk-btn { background:#0f3460; color:#e6edf5; border:1px solid #2b3650; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:0.8em; }
+  .mk-btn.primary { background:#e94560; border-color:#e94560; }
+  .mk-btn.cyan { background:transparent; border-color:#00e5ff; color:#00e5ff; }
+  .mk-btn.small { padding:3px 8px; font-size:0.75em; }
+  .mk-hint { font-size:0.7em; color:#6a7a9a; line-height:1.4; }
+
+  .mk-total-strip {
+    background:#0a152b; padding:8px 14px; font-size:0.78em;
+    display:flex; gap:16px; border-bottom:1px solid #0f3460;
+  }
+  .mk-total-strip strong { color:#ff9f43; }
+
+  .mk-add-menu {
+    position:absolute; top:44px; right:120px; z-index:50;
+    background:#16213e; border:1px solid #0f3460; border-radius:4px;
+    padding:6px 0; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,0.5);
+    font-size:0.8em;
+  }
+  .mk-add-menu-item { padding:6px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; color:#e6edf5; }
+  .mk-add-menu-item:hover { background:#0f3460; }
+  .mk-add-menu-item .mk-kind-icon { width:20px; height:20px; font-size:0.65em; }
+
+  /* Collapsed sidebar view */
+  .mk-collapsed-sb {
+    width:32px; background:#0a152b; border-left:1px solid #0f3460;
+    display:flex; flex-direction:column; align-items:center;
+    padding:12px 0; gap:16px; font-size:0.7em;
+  }
+  .mk-collapsed-sb .label { writing-mode:vertical-rl; transform:rotate(180deg); color:#a0a0b0; letter-spacing:1px; }
+
+  .mk-legend-inline {
+    display:flex; gap:12px; padding:6px 12px; font-size:0.7em; color:#a0a0b0;
+    background:#0a152b; border-bottom:1px solid #0f3460;
+  }
+  .mk-legend-inline .mk-kind-icon { width:16px; height:16px; font-size:0.55em; }
+</style>
+
+<h2>Design mockups v2 — with stop/waypoint distinction</h2>
+<p class="subtitle">Incorporates: icon differentiation, collapsible panel, All/Waypoints/Stops tabs, per-leg duration.</p>
+
+<!-- ========================== SCREEN 1 ========================== -->
+<div class="mockup" style="margin-top:24px;">
+  <div class="mockup-header">Screen 1 — Create Route page (expanded sidebar, "All" tab)</div>
+  <div class="mockup-body" style="padding:0;">
+    <div class="mk-header">
+      <a class="mk-nav-link" href="#">&larr; Library</a>
+      <strong style="color:#e6edf5;">New Route</strong>
+      <input class="mk-title-input" value="Saturday loop via Samford">
+      <select class="mk-select"><option>Cycling</option></select>
+      <div style="flex:1;"></div>
+      <button class="mk-btn cyan">Upload CSV…</button>
+      <button class="mk-btn">➕ Add…</button>
+    </div>
+
+    <div class="mk-options-row">
+      <label>Profile <select class="mk-select" style="padding:2px 6px;"><option>Bike</option></select></label>
+      <label><input type="checkbox" checked> Round trip</label>
+      <label><input type="checkbox" checked> Pin start</label>
+      <label><input type="checkbox"> Pin end</label>
+      <div style="flex:1;"></div>
+      <span class="mk-hint">Click the map to drop. New pins default to <strong>Waypoint</strong>; right-click → "Mark as Stop".</span>
+    </div>
+
+    <div class="mk-legend-inline">
+      <span>Legend:</span>
+      <span style="display:flex; gap:4px; align-items:center;"><span class="mk-kind-icon stop">1</span> Stop — you visit here</span>
+      <span style="display:flex; gap:4px; align-items:center;"><span class="mk-kind-icon wpt"><span>2</span></span> Waypoint — transit only</span>
+    </div>
+
+    <div class="mk-layout">
+      <div class="mk-map">
+        <svg width="100%" height="100%" viewBox="0 0 600 480" preserveAspectRatio="none">
+          <polyline class="mk-route-preview" points="80,400 200,320 330,200 440,280 520,360 80,400"/>
+        </svg>
+        <!-- Start halo + stop -->
+        <div class="mk-start-halo" style="left:13%; top:83%;"></div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:13%; top:83%; position:absolute;">1</div></div>
+        <!-- Waypoint 2 -->
+        <div class="mk-wpt-pin" style="left:33%; top:67%;"></div>
+        <div class="mk-wpt-pin-num" style="left:33%; top:67%;">2</div>
+        <!-- Stop 3 -->
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:55%; top:42%; position:absolute;">3</div></div>
+        <!-- Waypoint 4 -->
+        <div class="mk-wpt-pin" style="left:73%; top:58%;"></div>
+        <div class="mk-wpt-pin-num" style="left:73%; top:58%;">4</div>
+        <!-- End halo + stop -->
+        <div class="mk-end-halo" style="left:87%; top:75%;"></div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:87%; top:75%; position:absolute;">5</div></div>
+      </div>
+
+      <div class="mk-sidebar">
+        <div class="mk-sb-head">
+          <strong>Route stops &amp; waypoints</strong>
+          <button class="mk-collapse-btn" title="Collapse panel">▶</button>
+        </div>
+        <div class="mk-tabs">
+          <div class="mk-tab active">All<span class="mk-tab-count">(5)</span></div>
+          <div class="mk-tab">🛑 Stops<span class="mk-tab-count">(3)</span></div>
+          <div class="mk-tab">◆ Waypoints<span class="mk-tab-count">(2)</span></div>
+        </div>
+        <div class="mk-total-strip">
+          <span>Total: <strong>42.3 km</strong></span>
+          <span>Drive time: <strong>2h 10m</strong></span>
+          <span>+ dwell: <strong>45m</strong></span>
+        </div>
+        <div class="mk-sb-body">
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">1</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Home <span class="mk-badge stop">Stop · Start</span></div>
+              <div class="mk-stop-sub">152 Ferny Ave, Samford</div>
+            </div>
+            <span class="mk-stop-dwell" title="Dwell time">5m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 18 min · 6.2 km</div>
+
+          <div class="mk-stop is-wpt">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon wpt"><span>2</span></span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Turnoff via Mt Nebo Rd <span class="mk-badge wpt">Waypoint</span></div>
+              <div class="mk-stop-sub">-27.4083, 152.7911 · transit only</div>
+            </div>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 42 min · 12.8 km <span class="mk-leg-warn">· steep climb</span></div>
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">3</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Mt Glorious Café <span class="mk-badge stop">Stop</span></div>
+              <div class="mk-stop-sub">Mt Glorious Rd · coffee + snack</div>
+            </div>
+            <span class="mk-stop-dwell">20m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 28 min · 8.4 km</div>
+
+          <div class="mk-stop is-wpt">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon wpt"><span>4</span></span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Maiala Park junction <span class="mk-badge wpt">Waypoint</span></div>
+              <div class="mk-stop-sub">-27.3380, 152.8100</div>
+            </div>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 42 min · 14.9 km</div>
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">5</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Home <span class="mk-badge stop">Stop · End</span></div>
+              <div class="mk-stop-sub">return to start (round trip)</div>
+            </div>
+            <span class="mk-stop-dwell">20m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+        </div>
+        <div class="mk-sb-footer">
+          <div style="display:flex; gap:6px;">
+            <button class="mk-btn" style="flex:1;">➕ Add address</button>
+            <button class="mk-btn" style="flex:1;">Optimise</button>
+          </div>
+          <button class="mk-btn primary">Generate Route ⚡</button>
+          <button class="mk-btn cyan">Save Route</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================== SCREEN 2 ========================== -->
+<div class="mockup" style="margin-top:32px;">
+  <div class="mockup-header">Screen 2 — Same page, sidebar <em>collapsed</em>. Click the tab to re-expand.</div>
+  <div class="mockup-body" style="padding:0;">
+    <div class="mk-header">
+      <a class="mk-nav-link" href="#">&larr; Library</a>
+      <strong style="color:#e6edf5;">Saturday loop via Samford</strong>
+      <div style="flex:1;"></div>
+      <button class="mk-btn">Export GPX…</button>
+    </div>
+    <div class="mk-layout" style="height:360px;">
+      <div class="mk-map">
+        <svg width="100%" height="100%" viewBox="0 0 600 320" preserveAspectRatio="none">
+          <polyline class="mk-route-real" points="70,260 180,200 270,140 390,130 490,200 70,260"/>
+        </svg>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:12%; top:82%; position:absolute;">1</div></div>
+        <div class="mk-wpt-pin" style="left:30%; top:62%;"></div>
+        <div class="mk-wpt-pin-num" style="left:30%; top:62%;">2</div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:46%; top:42%; position:absolute;">3</div></div>
+        <div class="mk-wpt-pin" style="left:65%; top:40%;"></div>
+        <div class="mk-wpt-pin-num" style="left:65%; top:40%;">4</div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:82%; top:62%; position:absolute;">5</div></div>
+      </div>
+      <div class="mk-collapsed-sb">
+        <div class="label">◀ STOPS (5) &nbsp;·&nbsp; 42.3 km</div>
+      </div>
+    </div>
+    <div class="mk-hint" style="padding:8px 14px; background:#0a152b;">
+      Map is full-width when collapsed. Click the vertical tab to expand the panel. Same pattern applies to the inline Edit panel on the Analysis page.
+    </div>
+  </div>
+</div>
+
+<!-- ========================== SCREEN 3 ========================== -->
+<div class="mockup" style="margin-top:32px;">
+  <div class="mockup-header">Screen 3 — "Stops" tab only — filters out waypoints so you see just the destinations</div>
+  <div class="mockup-body" style="padding:0;">
+    <div class="mk-header">
+      <strong style="color:#e6edf5;">Saturday loop — editing</strong>
+      <div style="flex:1;"></div>
+      <span class="mk-stop-sub">3 stops · 2 waypoints · 42.3 km · 3h 15m total</span>
+    </div>
+    <div class="mk-layout" style="height:420px;">
+      <div class="mk-map">
+        <svg width="100%" height="100%" viewBox="0 0 600 380" preserveAspectRatio="none">
+          <polyline class="mk-route-real" points="70,320 200,240 340,150 460,240 540,290 70,320"/>
+        </svg>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:12%; top:84%; position:absolute;">1</div></div>
+        <div class="mk-wpt-pin" style="left:33%; top:63%; opacity:0.35;"></div>
+        <div class="mk-wpt-pin-num" style="left:33%; top:63%; opacity:0.35;">2</div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:56%; top:40%; position:absolute;">3</div></div>
+        <div class="mk-wpt-pin" style="left:77%; top:63%; opacity:0.35;"></div>
+        <div class="mk-wpt-pin-num" style="left:77%; top:63%; opacity:0.35;">4</div>
+        <div class="mk-pin"><div class="mk-stop-pin" style="left:90%; top:76%; position:absolute;">5</div></div>
+      </div>
+      <div class="mk-sidebar">
+        <div class="mk-sb-head">
+          <strong>Route stops &amp; waypoints</strong>
+          <button class="mk-collapse-btn">▶</button>
+        </div>
+        <div class="mk-tabs">
+          <div class="mk-tab">All<span class="mk-tab-count">(5)</span></div>
+          <div class="mk-tab active">🛑 Stops<span class="mk-tab-count">(3)</span></div>
+          <div class="mk-tab">◆ Waypoints<span class="mk-tab-count">(2)</span></div>
+        </div>
+        <div class="mk-total-strip">
+          <span>Stops: <strong>3</strong></span>
+          <span>Visit time: <strong>45m</strong></span>
+          <span>Total incl. drive: <strong>3h 15m</strong></span>
+        </div>
+        <div class="mk-sb-body">
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">1</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Home <span class="mk-badge stop">Stop · Start</span></div>
+              <div class="mk-stop-sub">152 Ferny Ave, Samford</div>
+            </div>
+            <span class="mk-stop-dwell">5m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 60 min · 19.0 km <span style="color:#6a7a9a;">(through Mt Nebo Rd)</span></div>
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">3</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Mt Glorious Café <span class="mk-badge stop">Stop</span></div>
+              <div class="mk-stop-sub">Mt Glorious Rd</div>
+            </div>
+            <span class="mk-stop-dwell">20m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-leg"><span class="mk-leg-icon">🚴</span> 70 min · 23.3 km <span style="color:#6a7a9a;">(through Maiala Park)</span></div>
+
+          <div class="mk-stop is-stop">
+            <span class="mk-handle">⋮⋮</span>
+            <span class="mk-kind-icon stop">5</span>
+            <div class="mk-stop-body">
+              <div class="mk-stop-name">Home <span class="mk-badge stop">Stop · End</span></div>
+              <div class="mk-stop-sub">return to start</div>
+            </div>
+            <span class="mk-stop-dwell">20m</span>
+            <button class="mk-iconbtn">✕</button>
+          </div>
+
+          <div class="mk-hint" style="padding:12px;">
+            Waypoints 2 and 4 are hidden but still part of the route.
+            The leg "60 min · 19.0 km" below stop 1 includes the detour through waypoint 2.
+          </div>
+
+        </div>
+        <div class="mk-sb-footer">
+          <button class="mk-btn cyan">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px;">
+  Data-model impact: each <code>route_waypoints</code> row gets <code>kind</code> (<code>stop</code>|<code>waypoint</code>) and <code>dwell_minutes</code>.
+  The per-leg duration comes from the cached Valhalla response (distance + time) and is recomputed on regeneration.
+</p>
+
+<p class="subtitle">Approve or flag anything else.</p>
