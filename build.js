@@ -16,8 +16,10 @@ async function build() {
   const configs = [
     { entryPoints: ['src/js/analysis/app.js'], outfile: path.join(outdir, 'analysis.min.js'), format: 'iife' },
     { entryPoints: ['src/js/library/library-app.js'], outfile: path.join(outdir, 'library.min.js'), format: 'iife' },
+    { entryPoints: ['src/js/create/app.js'], outfile: path.join(outdir, 'create.min.js'), format: 'iife' },
     { entryPoints: ['src/css/analysis-bundle.css'], outfile: path.join(outdir, 'analysis.min.css') },
     { entryPoints: ['src/css/library-bundle.css'], outfile: path.join(outdir, 'library.min.css') },
+    { entryPoints: ['src/css/create-bundle.css'], outfile: path.join(outdir, 'create.min.css') },
   ];
 
   const contexts = [];
