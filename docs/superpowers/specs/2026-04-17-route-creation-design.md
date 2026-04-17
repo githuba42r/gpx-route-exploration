@@ -333,6 +333,29 @@ Central milestone. Expands the bare profile picker into the full elevation- and 
 - Right-click a marker → menu works.
 - Convert GPX-only route → recipe populated with 6 waypoints → edit panel enabled.
 
+### M7 — Mobile responsive design
+
+All pages made usable on phone-sized viewports (≥ 360 px wide). Not a separate mobile app — the same Flask-served pages work across form factors via CSS media queries and touch-event adaptations.
+
+**Ships:**
+- Viewport meta tag + a `mobile.css` imported at the end of each bundle that applies at `max-width: 900px`.
+- **Library page** — cards stack to a single column; sidebar tag cloud collapses into a filter button that opens a drawer.
+- **Analysis page** — map fills the width; elevation profile stacks below at reduced height (~160 px); legend scrolls horizontally with snap points; the drag-to-zoom on the profile and the gradient-overlay segments work with touch.
+- **Create page & Edit panel** — the split map + sidebar layout flips to stacked: map takes the top two-thirds of the viewport, editor occupies the bottom third as a swipeable sheet (swipe up to expand to full-screen, down to collapse). Same All/Stops/Waypoints tabs; the tab row becomes sticky at the top of the sheet.
+- **Touch adaptations:**
+    - Tap-to-add waypoint on the map replaces click.
+    - Long-press on a map marker (~500 ms) replaces right-click for the context menu.
+    - Drag-to-reorder in the sidebar uses SortableJS touch handling (already supported; verify).
+    - Tap a profile point to pin hover info; tap elsewhere to dismiss — replaces mouseenter/leave.
+    - Pinch to zoom and two-finger drag to pan the map.
+- **Tap-target sizing:** minimum 44 × 44 px for all interactive elements on mobile (buttons, icons, waypoint markers).
+- **No horizontal scrolling** on any page at 360 px width.
+
+**Acceptance:**
+- Playwright runs the existing test suites against an iPhone 13 viewport (`page.set_viewport_size({width: 390, height: 844})` + `page.emulate_media(...)`), and a dedicated `test_ui_mobile.py` covers: tap-to-add on Create page, swipeable sheet on Edit panel, long-press context menu, profile drag-zoom on touch, library card stacking.
+- Visual regression: screenshots of library, analysis, and create pages at 390 × 844 committed under `tests/fixtures/mobile-screenshots/`; CI fails on pixel diff beyond threshold.
+- Manual verification checklist: one pass on a real phone (iOS Safari or Android Chrome) confirming drag, pinch, long-press, and sheet gestures feel natural.
+
 ## 6. Testing strategy
 
 ### Unit (pytest)
@@ -341,7 +364,8 @@ Central milestone. Expands the bare profile picker into the full elevation- and 
 
 ### Integration (Playwright)
 - Existing UI tests (`test_ui_library.py`, `test_ui_analysis.py`) must stay green at every milestone.
-- New per-milestone files: `test_ui_create.py`, `test_ui_edit_panel.py`, `test_ui_options.py`, `test_ui_csv_upload.py`.
+- New per-milestone files: `test_ui_create.py`, `test_ui_edit_panel.py`, `test_ui_options.py`, `test_ui_csv_upload.py`, `test_ui_mobile.py`.
+- From M7 onward, the existing desktop suites plus `test_ui_mobile.py` both run — every change must keep both green.
 
 ### Regression between milestones
 - `./dev.sh` already runs the pytest unit suite. Add a `./test-full.sh` that additionally runs the Playwright suite (with `python -m playwright install chromium` step). Document in README.
@@ -351,12 +375,11 @@ Each milestone has a short manual-test checklist in the implementation plan (e.g
 
 ## 7. Non-goals (for this spec)
 
-- Multi-user / collaboration.
-- Public sharing / export beyond GPX.
-- Mobile-specific UI. The existing desktop-first layout is retained; responsive improvements are a separate initiative.
-- Real-time-GPS tracking.
-- Turn-by-turn navigation output (Valhalla produces maneuvers; consuming them is a later piece).
-- Routing over *arbitrary* user-drawn polygons as a first-class object. `exclude_polygons` is used internally for park avoidance in M6, but there's no general-purpose polygon editor.
+- **Multi-user editing / real-time collaboration.** One user per instance. Not in this spec and not planned. A future initiative *may* add **view-only route sharing and commenting** (a user can publish a link to a read-only copy of a route; viewers can leave comments without editing). That is out of scope here and deliberately *not* factored into the data model — it would be additive (a `shares` table, a `comments` table) and can be designed separately when we pick it up.
+- **Real-time GPS tracking / live navigation on the device.** Not in this spec and not planned. The tool is for *planning and analysing* routes before a ride; on-device tracking and turn-by-turn belong to purpose-built apps (OsmAnd, Komoot, Strava, EUC World, Ride with GPS, etc.). Exporting GPX in M4 means those apps can consume what we produce.
+- **Turn-by-turn navigation output.** Valhalla returns maneuver data on each `/route` call; we discard it. Consuming it (voice prompts, step list UI) is a later piece if it's ever wanted.
+- **Public sharing / export beyond GPX.** See the view-only sharing note above.
+- **Routing over *arbitrary* user-drawn polygons as a first-class object.** `exclude_polygons` is used internally for park avoidance in M6, but there's no general-purpose polygon editor.
 
 ## 8. Open questions / risks
 
