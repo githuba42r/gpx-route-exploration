@@ -66,10 +66,9 @@ def test_marker_right_click_toggles_kind(page, server_url):
 def test_drag_reorder_waypoints(page, server_url):
     """Drag the second sidebar row above the first; verify the PUT reorder
     API landed and the list order swapped."""
-    page.set_viewport_size({"width": 1280, "height": 1000})
-    page.goto(f"{server_url}/create")
-    page.wait_for_function(
-        "() => new URL(location.href).searchParams.get('route_id') !== null")
+    # Reuse the fresh-localStorage helper to sidestep the view-state
+    # pollution that was making this test flaky when run alongside others.
+    _goto_create_fresh(page, server_url)
     _click_map_at(page, "#map", 0.25, 0.4)
     _click_map_at(page, "#map", 0.5, 0.4)
     _click_map_at(page, "#map", 0.75, 0.4)
@@ -231,6 +230,58 @@ def test_auto_generate_preference_persists_across_reload(page, server_url):
     page.wait_for_function(
         "() => document.getElementById('generate-control').dataset.variant !== 'manual'",
         timeout=5000,
+    )
+
+
+def test_primary_label_stays_generate_now_across_auto_states(page, server_url):
+    """The primary button label is always 'Generate Now' outside of busy
+    state — manual, ready, and (with countdown) debounce all read the same."""
+    _goto_create_fresh(page, server_url)
+
+    # Manual.
+    expect(page.locator("#gen-primary-label")).to_have_text("Generate Now")
+
+    # Enable auto (with 2 waypoints so auto has something to schedule).
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+    page.locator("#btn-gen-dropdown").click()
+    page.locator("#menu-enable-auto").click()
+
+    # Still 'Generate Now' after auto-on — variant changes, label doesn't.
+    expect(page.locator("#gen-primary-label")).to_have_text("Generate Now", timeout=3000)
+    # And the variant is no longer manual.
+    page.wait_for_function(
+        "() => document.getElementById('generate-control').dataset.variant !== 'manual'",
+        timeout=3000,
+    )
+
+
+def test_auto_on_with_single_waypoint_does_not_start_countdown(page, server_url):
+    """Auto mode should not fire for a route with fewer than two waypoints —
+    Valhalla requires ≥ 2 and firing a debounce timer just to error out is
+    noise the user shouldn't see."""
+    _goto_create_fresh(page, server_url)
+    # Add ONE waypoint.
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 1", timeout=5000)
+
+    # Enable auto.
+    page.locator("#btn-gen-dropdown").click()
+    page.locator("#menu-enable-auto").click()
+
+    # Variant becomes 'ready' (not debounce) and stays there — no timer.
+    expect(page.locator("#generate-control")).to_have_attribute("data-variant", "ready", timeout=2000)
+    # Countdown SVG is hidden.
+    expect(page.locator("#gen-primary-countdown")).to_be_hidden()
+
+    # Drop a second waypoint — now the timer DOES kick in.
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => ['debounce', 'rate'].includes(document.getElementById('generate-control').dataset.variant)",
+        timeout=3000,
     )
 
 

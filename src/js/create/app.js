@@ -108,9 +108,16 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
 
 async function onWaypointsChanged(state, editor) {
   await reloadWaypoints(state, editor);
-  if (state.autoGenerate) {
+  // Guard auto-generation to routes with at least two waypoints — Valhalla
+  // needs that many, and firing a debounce timer for a single-point route
+  // just leads to a user-visible countdown that then errors out.
+  if (state.autoGenerate && state.waypoints.length >= 2) {
     scheduleGenerate(state);
     ensureRenderLoop(state);
+  } else if (state.pendingTimer) {
+    // Dropped below the threshold while a timer was running — cancel it.
+    cancelPending(state);
+    setStatus('Idle', 'idle');
   }
   renderGenerateControl(state);
 }
@@ -276,6 +283,10 @@ function renderGenerateControl(state) {
   const countdownWrap = document.getElementById('gen-primary-countdown');
   const progress = countdownWrap.querySelector('circle.progress');
 
+  // The label stays "Generate Now" in every non-busy state; the variant
+  // (and the circular countdown) tells the user what's happening. That way
+  // the button always reads as the positive action the user is thinking of
+  // ("I want the route") and the colour signals the mode.
   let variant, iconText, labelText, disabled = false, showCountdown = false;
 
   if (state.isGenerating) {
@@ -283,12 +294,11 @@ function renderGenerateControl(state) {
   } else if (state.autoGenerate && state.pendingTimer) {
     variant = (state.lastGenerateAt && Date.now() - state.lastGenerateAt < GLOBAL_RATE_LIMIT_MS)
       ? 'rate' : 'debounce';
-    iconText = '';
-    const remaining = Math.max(0, (state.pendingDeadline || 0) - Date.now());
-    labelText = `${(remaining / 1000).toFixed(1)}s`;
+    iconText = '';         // countdown SVG takes the icon slot
+    labelText = 'Generate Now';
     showCountdown = true;
   } else if (state.autoGenerate) {
-    variant = 'ready'; iconText = '✓'; labelText = 'Auto-gen ready';
+    variant = 'ready'; iconText = '⚡'; labelText = 'Generate Now';
   } else {
     variant = 'manual'; iconText = '⚡'; labelText = 'Generate Now';
   }
@@ -313,9 +323,9 @@ function renderGenerateControl(state) {
   // Title tooltips convey the action that clicking the primary will take.
   primary.title = {
     manual: 'Generate the route now',
-    ready: 'Click to disable auto-generate',
-    debounce: 'Click to disable auto-generate (or pick Generate Now from the menu)',
-    rate: 'Rate-limited — click to disable auto-generate',
+    ready: 'Auto-generate is ON — click to turn it off',
+    debounce: `Auto-generate running (countdown to next call) — click to turn auto off, or pick "Generate Now" from ▾ to skip the wait`,
+    rate: 'Rate-limited — click to turn auto off',
     busy: 'Generating…',
   }[variant] || '';
 }
@@ -516,8 +526,12 @@ async function main() {
   });
 
   // --- Map click → append waypoint ---
+  // state.clickCounter is a synchronous counter so that two clicks firing
+  // before the first reloadWaypoints() returns still get distinct default
+  // names. Initialised to the current waypoint count on load.
+  state.clickCounter = state.waypoints.length;
   state.map.on('click', async (e) => {
-    const n = state.waypoints.length + 1;
+    const n = ++state.clickCounter;
     await api.appendWaypoint(state.routeId, {
       name: `Waypoint ${n}`, lat: e.latlng.lat, lon: e.latlng.lng, kind: 'waypoint',
     });
