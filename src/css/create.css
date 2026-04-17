@@ -152,30 +152,33 @@
   top: 30% !important;
   bottom: auto !important;
   left: auto !important;
-  width: 32px !important;
-  height: 56px !important;
+  width: 24px !important;
+  height: 40px !important;
   background: #f5f5f5 !important;
   border: 1px solid #888;
   border-right: none;
-  border-radius: 16px 0 0 16px;
-  box-shadow: -3px 2px 10px rgba(0, 0, 0, 0.3);
+  border-radius: 12px 0 0 12px;
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.3);
   overflow: hidden;
   z-index: 900;
 }
-/* Centre the chevron inside the pill. The widget's head is the only visible
- * child when .wpe-collapsed; its padding and justify need resetting. */
-#editor-panel.collapsed .wpe-collapsed .wpe-head {
-  padding: 0;
-  height: 100%;
-  justify-content: center;
-  align-items: center;
-  border-bottom: none;
-  background: transparent;
+/* The widget's collapse JS applies .wpe-collapsed to its container — which
+ * IS #editor-panel on the Create page, so the two classes land on the same
+ * element. Selector needs to be a compound, not a descendant. Without this
+ * the default .wpe-head's padding and border-bottom leak through, which
+ * made the pill oversized and showed an extra horizontal line. */
+#editor-panel.collapsed .wpe-head {
+  padding: 0 !important;
+  height: 100% !important;
+  justify-content: center !important;
+  align-items: center !important;
+  border-bottom: none !important;
+  background: transparent !important;
 }
 #editor-panel.collapsed .wpe-collapse {
-  font-size: 1.5em;
+  font-size: 1.1em;
   padding: 0;
-  color: #333;     /* dark chevron on the light pill — matches osm1 */
+  color: #333;
   background: transparent;
   line-height: 1;
 }
