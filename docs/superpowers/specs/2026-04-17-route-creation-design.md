@@ -36,9 +36,28 @@ The recipe is the editable source of truth for a route:
 
 ```
 route_waypoints[]   — ordered list of stops + waypoints
-route_options       — profile, round_trip, pin flags, optimisation state
+route_options       — profile, routing preset, costing knobs, round_trip, gradient-warn threshold, timestamps
 route_legs[]        — cached Valhalla segment data (distance, time, polyline) per leg
 ```
+
+### Routing preset & costing options (elevation-aware)
+
+The app is designed for off-road / national-park / fire-trail cycling where gradient navigability matters as much as distance. Rather than a bare "bicycle / walking / car" picker, each route carries a **routing preset** plus a **costing options** JSON blob that controls how Valhalla scores edges.
+
+Presets are UI shortcuts that set a sensible costing blob; "Custom" exposes the knobs individually:
+
+| Preset | Profile | Key costing options |
+|---|---|---|
+| **Road cyclist** | `bicycle` | `bicycle_type=Road`, `avoid_bad_surfaces=0.9`, `use_hills=0.5` |
+| **Gravel / MTB** | `bicycle` | `bicycle_type=Mountain`, `avoid_bad_surfaces=0.0`, `use_hills=0.6`, `private_access_penalty=100` |
+| **Easy ride** | `bicycle` | `bicycle_type=Hybrid`, `use_hills=0.1`, `max_gradient_warn=6%` |
+| **Hike** | `pedestrian` | `use_hills=0.7`, `use_tracks=0.9` |
+| **Drive** | `auto` | defaults |
+| **Custom…** | any | user-controlled sliders |
+
+Valhalla's `use_hills` is a *soft* penalty — it prefers gentler edges but will take a 20 % climb if nothing else exists. To give "I won't ride steeper than X %" teeth, every generated route is **post-processed** against `max_gradient_warn` (optional per route): any sub-segment whose smoothed gradient exceeds the threshold gets a ⚠️ badge in the sidebar ("leg 3: 18 % over 120 m") and the offending section is outlined on the map in the steepest-band colour. The user can then drop a via-waypoint to force a detour.
+
+National-park / fire-trail handling in v1 relies on the costing knobs: `bicycle_type=Mountain` + `avoid_bad_surfaces=0` makes fire trails *preferred*, and `private_access_penalty` controls whether permit-only tracks are considered. Hard "avoid all national parks" boundaries use Valhalla's `exclude_polygons` and are deferred to M6 because they need polygon data fetched from Overpass.
 
 ### Detailed GPX
 
@@ -153,9 +172,12 @@ CREATE TABLE route_waypoints (
 CREATE INDEX idx_waypoints_route ON route_waypoints(route_id);
 
 CREATE TABLE route_options (
-    route_id         INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
-    profile          TEXT    NOT NULL DEFAULT 'bicycle' CHECK(profile IN ('bicycle','walking','auto')),
-    round_trip       INTEGER NOT NULL DEFAULT 0 CHECK(round_trip IN (0, 1)),
+    route_id          INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
+    profile           TEXT    NOT NULL DEFAULT 'bicycle' CHECK(profile IN ('bicycle','pedestrian','auto')),
+    costing_preset    TEXT    NOT NULL DEFAULT 'hybrid' CHECK(costing_preset IN ('road','gravel-mtb','easy','hike','drive','custom','hybrid')),
+    costing_options   TEXT,               -- JSON blob merged into the Valhalla costing request; see below
+    round_trip        INTEGER NOT NULL DEFAULT 0 CHECK(round_trip IN (0, 1)),
+    max_gradient_warn REAL,               -- NULL = no warning; else flag sub-segments whose smoothed gradient exceeds this %
     last_optimised_at INTEGER,
     last_generated_at INTEGER
 );
@@ -167,6 +189,8 @@ CREATE TABLE route_legs (
     distance_m      REAL    NOT NULL,
     duration_s      REAL    NOT NULL,
     polyline        TEXT    NOT NULL,                    -- encoded polyline from Valhalla
+    max_grade_pct   REAL,                                -- steepest smoothed gradient on this leg
+    warnings        TEXT,                                -- JSON array of {from_m, to_m, peak_grad_pct} (M3)
     PRIMARY KEY (route_id, from_position, to_position)
 );
 
@@ -181,7 +205,19 @@ CREATE TABLE geocode_cache (
 
 **Schema change discipline.** Additive only. M1 adds `route_waypoints`, `route_options`, `route_legs`; M5 adds `geocode_cache`. Extend `server/models/schema.sql` and use `CREATE TABLE IF NOT EXISTS` at app startup — existing deployments upgrade seamlessly. Existing routes (no recipe) have zero rows in `route_waypoints`, which is the signal that they're GPX-only.
 
-**Profile naming.** Storage uses Valhalla's own codes (`bicycle`, `walking`, `auto`). The UI labels them "Bike", "Walk", "Car".
+**Profile naming.** Storage uses Valhalla's own codes (`bicycle`, `pedestrian`, `auto`). The UI labels them "Bike", "Walk", "Car".
+
+**`costing_options` JSON shape.** A plain object merged directly into the `costing_options.<profile>` field of the Valhalla `/route` request. Typical shape for the Gravel / MTB preset:
+```json
+{
+  "use_hills": 0.6,
+  "bicycle_type": "Mountain",
+  "avoid_bad_surfaces": 0.0,
+  "use_tracks": 0.5,
+  "private_access_penalty": 100
+}
+```
+Presets are a deterministic server-side function: `preset_name → costing_options`. When the user picks Custom and changes a slider, the preset flips to `custom` and the JSON is stored verbatim. This keeps us forward-compatible with new Valhalla costing options — a new knob ships as a new JSON key without a schema migration.
 
 ## 5. Milestones
 
@@ -223,24 +259,30 @@ Each milestone ends with unit tests (pytest) + UI tests (Playwright) + manual ve
 - Save Changes persists; Discard reverts.
 - UI: `test_ui_edit_panel.py` covers open/close, drag, regen, discard, disabled on GPX-only.
 
-### M3 — Routing options & optimisation
+### M3 — Routing options, elevation-aware costing, optimisation
+
+Central milestone. Expands the bare profile picker into the full elevation- and surface-aware routing UX that's the project's design goal.
 
 **Ships:**
-- Profile picker live (bicycle / walking / auto aka car); switching profile invalidates cached `route_legs` and requires regeneration.
-- Round-trip toggle: if on, Valhalla request appends a return leg from last→first stop.
-- Start/end pin checkboxes (per-waypoint in the editor; also a quick pin-as-start on hover).
+- **Routing preset dropdown** (Road cyclist / Gravel-MTB / Easy ride / Hike / Drive / Custom) in the editor options bar. Selecting a preset fills `route_options.costing_preset` and `costing_options` server-side; a new REST endpoint `GET /api/routing-presets` returns the preset → costing-options mapping so the client doesn't have to hard-code it.
+- **Custom costing panel** (collapsible, under the preset dropdown) with sliders and inputs for: `use_hills`, `bicycle_type` (when profile=bicycle), `avoid_bad_surfaces`, `use_tracks` (pedestrian), `private_access_penalty`, and `max_gradient_warn`. Editing a slider flips `costing_preset` to `custom`.
+- **Round-trip toggle**: if on, Valhalla request appends a return leg from last→first stop.
+- **Start/end pin** checkboxes (per-waypoint in the editor; also a quick pin-as-start on hover).
 - **Include/exclude** per waypoint — excluded waypoints persist in the recipe but don't participate in routing (and don't appear on the detailed GPX track). Accessed two ways:
     1. A toggle control on each sidebar list item (eye / eye-slash icon), with the row dimmed when excluded.
-    2. A "Include" / "Exclude" entry in the right-click context menu on the map marker.
-- "Optimise" button runs nearest-neighbour initialisation + 2-opt local search on included waypoints, respecting pins.
-- New API: `POST /api/routes/<id>/optimise` returns `{ new_order: [waypoint_id, ...] }`.
+    2. An "Include" / "Exclude" entry in the right-click context menu on the map marker.
+- **`generate` endpoint wiring.** `POST /api/routes/<id>/generate` now reads `route_options.profile` + `costing_options` and injects them into the Valhalla `/route` request body at `costing` + `costing_options.<profile>`. Also passes `elevation_interval: 10` so returned trkpts carry elevation.
+- **Gradient-warning post-processor** (`server/route_postprocess.py`): after every `/generate` call, scan the returned legs' elevation samples using the same smoothing+window logic as the analysis page, flag any sub-segment whose smoothed gradient exceeds `max_gradient_warn`. Warnings are persisted alongside `route_legs` (new column `warnings TEXT` — JSON array of `{from_m, to_m, peak_grad_pct}`) and surfaced in the sidebar (⚠️ badge on the affected leg row) + highlighted on the map in the steepest-band colour.
+- **"Optimise" button** runs nearest-neighbour initialisation + 2-opt local search on included waypoints, respecting pins. Cost function uses *route-network distance* from cached `route_legs` when available, falling back to haversine. New API: `POST /api/routes/<id>/optimise` returns `{ new_order: [waypoint_id, ...] }`.
+- Changing `profile`, `costing_preset`, or any `costing_options` value invalidates `route_legs` and marks the route as "needs regeneration" (disabled analysis until user hits Regenerate).
 
 **Acceptance:**
-- Toggle walking profile → existing route invalidated → Regenerate → different GPX (flatter, different path).
+- Switch preset from Road cyclist → Gravel-MTB on a route with an unpaved cut-through → Regenerate → the new track uses the unpaved cut-through (compare returned polyline to the road-preferring version).
+- Route with a forced-steep segment and `max_gradient_warn=10` → sidebar shows a ⚠️ badge on the offending leg; map highlights the over-threshold sub-segment; clearing `max_gradient_warn` removes the badge without re-hitting Valhalla.
 - Exclude a waypoint via the list toggle, Regenerate → route skips it. Right-click the excluded marker → re-include via context menu.
 - Pin first stop, click Optimise → order changes but pinned stop stays at index 0.
-- Unit: `test_optimiser.py` with synthetic point sets (include a 2-opt-reducible case).
-- UI: `test_ui_options.py` — profile switch invalidates legs; optimise reorders; pin honoured; include toggle works from list and from context menu.
+- Unit: `test_optimiser.py` with synthetic point sets (include a 2-opt-reducible case); `test_route_postprocess.py` covers the gradient-warning logic with synthetic elevation samples; `test_costing_presets.py` verifies preset → costing-options mapping.
+- UI: `test_ui_options.py` — preset switching, custom panel, profile switch invalidates legs, optimise reorders, pin honoured, include toggle works from list and from context menu, gradient warning badge renders when threshold is crossed.
 
 ### M4 — Rich GPX export / import
 
@@ -280,6 +322,7 @@ Each milestone ends with unit tests (pytest) + UI tests (Playwright) + manual ve
 **Ships:**
 - Address autocomplete on manual "Add by address…" (uses `/api/geocode/search`).
 - Right-click context menu on map waypoint markers expanded from its M3 "Include/Exclude" version to also include: "Mark as Stop" / "Mark as Waypoint", "Pin as Start" / "Pin as End", "Remove from route".
+- **Polygon-based area avoidance** (stretch): fetch protected-area and national-park polygons on demand from Overpass (`boundary=protected_area`, `boundary=national_park`, optionally `landuse=military`), let the user enable avoidance per-route, and pass the resulting GeoJSON to Valhalla as `exclude_polygons`. Polygons are cached locally so the same park isn't refetched between routes.
 - Loading indicators on Valhalla and geocoding calls.
 - "Convert to recipe" button on GPX-only routes: extracts N evenly-spaced points (default 6) from the trackpoints as waypoints — explicitly labelled as lossy.
 - Waypoint icon visual fix: replace CSS `rotate(45deg)` with a `clip-path` diamond so icon bounds stay inside their 26 px slot and the "Waypoint" label no longer wraps.
@@ -310,14 +353,17 @@ Each milestone has a short manual-test checklist in the implementation plan (e.g
 
 - Multi-user / collaboration.
 - Public sharing / export beyond GPX.
-- Elevation-aware routing (Valhalla can do it; out of scope until the base flow is stable).
 - Mobile-specific UI. The existing desktop-first layout is retained; responsive improvements are a separate initiative.
 - Real-time-GPS tracking.
+- Turn-by-turn navigation output (Valhalla produces maneuvers; consuming them is a later piece).
+- Routing over *arbitrary* user-drawn polygons as a first-class object. `exclude_polygons` is used internally for park avoidance in M6, but there's no general-purpose polygon editor.
 
 ## 8. Open questions / risks
 
 - **Valhalla request latency.** A local Valhalla can be slow on first request (cold cache). The sync-request model accepts this but we should add a 30 s timeout and graceful error. Mitigation: spinner state + clear error on timeout.
 - **Nominatim rate-limit attribution.** Self-hosted Nominatim may not need the 1 req/s delay. Keep it configurable via `NOMINATIM_RATE_LIMIT_MS` env var (default 1000 ms).
+- **Valhalla DEM coverage.** The gradient-aware routing depends on the Valhalla graph being built *with* DEM elevation data. The hosted `valhalla1.openstreetmap.de` instance is built with SRTM; a self-hosted Valhalla must have `elevation` in its tile-build config. If the configured `VALHALLA_URL` responds without `elevation_interval` samples in the route reply, M3's post-processor has no gradient data to work with and must degrade gracefully (warnings disabled, UI badge explaining why). Check-on-startup: issue a tiny probe route and cache whether elevation samples came back.
+- **Surface + access tag coverage in OSM.** Off-road routing quality is only as good as local OSM tagging of `highway=track`, `tracktype=*`, `surface=*`, and `access=*`. Routes through sparsely-tagged areas may give noisy results; this is a data problem we can't fix in this spec, but the `private_access_penalty` knob lets users relax restrictions manually when they know a tagged-private track is actually accessible.
 - **Schema migration on an existing prod DB.** M1 is additive (all new tables + two new columns on `routes` would be avoided by using new tables only). Migration must run on first app start if needed; fail-loud on version mismatch.
 - **Undo/redo.** Deferred. Discard + page refresh is the v1 story.
 
