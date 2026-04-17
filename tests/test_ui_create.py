@@ -88,21 +88,10 @@ def test_drag_reorder_waypoints(page, server_url):
     )
 
 
-def test_pin_first_as_start(page, server_url):
-    page.set_viewport_size({"width": 1280, "height": 1000})
-    page.goto(f"{server_url}/create")
-    page.wait_for_function(
-        "() => new URL(location.href).searchParams.get('route_id') !== null")
-    _click_map_at(page, "#map", 0.3, 0.4)
-    _click_map_at(page, "#map", 0.6, 0.4)
-    page.wait_for_function(
-        "() => document.querySelectorAll('.wpe-item').length === 2",
-        timeout=3000,
-    )
-    page.locator("#pin-start-cb").check()
-    expect(page.locator(".wpe-item").first.locator(".wpe-badge")).to_have_text("Start", timeout=3000)
-    page.locator("#pin-start-cb").uncheck()
-    expect(page.locator(".wpe-item").first.locator(".wpe-badge")).to_have_count(0, timeout=3000)
+# test_pin_first_as_start removed: the manual "Pin first as start" checkbox
+# was redundant in M1 (no optimiser yet — first waypoint is the start by
+# definition). The pin_role column on route_waypoints is still there for
+# when M3 ships optimisation and needs to lock pre-optimisation ordering.
 
 
 # --------------------------------------------------------------------------

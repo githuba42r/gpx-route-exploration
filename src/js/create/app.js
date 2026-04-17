@@ -104,11 +104,6 @@ async function reloadWaypoints(state, editor, { bump = true } = {}) {
   if (state.generatedVersion !== state.currentVersion) {
     clearGeneratedLayer(state);
   }
-  const pinCb = document.getElementById('pin-start-cb');
-  if (pinCb) {
-    pinCb.checked = state.waypoints.length > 0 && state.waypoints[0].pin_role === 'start';
-    pinCb.disabled = state.waypoints.length === 0;
-  }
 }
 
 async function onWaypointsChanged(state, editor) {
@@ -526,14 +521,6 @@ async function main() {
     await api.appendWaypoint(state.routeId, {
       name: `Waypoint ${n}`, lat: e.latlng.lat, lon: e.latlng.lng, kind: 'waypoint',
     });
-    await onWaypointsChanged(state, editor);
-  });
-
-  // --- Pin-start checkbox ---
-  document.getElementById('pin-start-cb').addEventListener('change', async (e) => {
-    if (state.waypoints.length === 0) return;
-    const firstId = state.waypoints[0].id;
-    await api.patchWaypoint(state.routeId, firstId, { pin_role: e.target.checked ? 'start' : null });
     await onWaypointsChanged(state, editor);
   });
 
