@@ -119,3 +119,33 @@
 }
 .stop-edit-actions button.primary { background:#e94560; border-color:#e94560; }
 .stop-edit-actions button:hover { filter:brightness(1.1); }
+
+/* -------------------- M3a pin controls & include toggle -------------------- */
+
+.wpe-pin-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  opacity: 0.5;
+  transition: opacity 150ms;
+  font-size: 0.8em;
+}
+.wpe-item:hover .wpe-pin-controls,
+.wpe-item .wpe-pin-controls:has(input:checked) {
+  opacity: 1;
+}
+.wpe-pin-controls label {
+  cursor: pointer;
+}
+.wpe-include-toggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 1em;
+  color: inherit;
+}
+.wpe-excluded {
+  opacity: 0.45;
+  text-decoration: line-through wavy #c77;
+}

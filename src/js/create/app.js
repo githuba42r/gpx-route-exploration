@@ -989,6 +989,20 @@ async function main() {
         await api.deleteWaypoint(state.routeId, wptId);
         await onWaypointsChanged(state, editor);
       },
+      onUpdate: async (wptId, patch) => {
+        // pin_role is mutually-exclusive across the whole route — if the
+        // user pinned a new start/end, clear the previous one first so
+        // the server never sees two rows with the same role.
+        if (patch.pin_role === 'start' || patch.pin_role === 'end') {
+          const role = patch.pin_role;
+          const current = state.waypoints.find(w => w.pin_role === role && w.id !== wptId);
+          if (current) {
+            await api.patchWaypoint(state.routeId, current.id, { pin_role: null });
+          }
+        }
+        await api.patchWaypoint(state.routeId, wptId, patch);
+        await onWaypointsChanged(state, editor);
+      },
       // Collapse the whole sidebar, not just the widget inside — otherwise
       // the aside stays at 340 px and the map keeps a dark dead strip on
       // its right edge.

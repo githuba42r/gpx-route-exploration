@@ -117,12 +117,42 @@ export function mountWaypointEditor(container, handlers = {}) {
         <div class="wpe-body">
           <div class="wpe-name">${escape(w.name)}${w.pin_role ? ` <span class="wpe-badge">${w.pin_role === 'start' ? 'Start' : 'End'}</span>` : ''}</div>
           <div class="wpe-sub">${escape(w.address || (w.lat != null ? `${w.lat.toFixed(4)}, ${w.lon.toFixed(4)}` : ''))}</div>
+          <div class="wpe-pin-controls">
+            <label title="Pin as route start">
+              <input type="checkbox" class="wpe-pin-start" ${w.pin_role === 'start' ? 'checked' : ''}> S
+            </label>
+            <label title="Pin as route end">
+              <input type="checkbox" class="wpe-pin-end" ${w.pin_role === 'end' ? 'checked' : ''}> E
+            </label>
+            <button class="wpe-include-toggle" type="button"
+                    title="${w.included === 0 ? 'Include in route' : 'Exclude from route'}">
+              ${w.included === 0 ? '◌' : '●'}
+            </button>
+          </div>
         </div>
         <button class="wpe-remove" title="Remove" type="button">✕</button>
       `;
       li.querySelector('.wpe-remove').addEventListener('click', (e) => {
         e.stopPropagation();
         if (handlers.onRemove) handlers.onRemove(w.id);
+      });
+      li.querySelector('.wpe-pin-start').addEventListener('change', (e) => {
+        e.stopPropagation();
+        if (handlers.onUpdate) {
+          handlers.onUpdate(w.id, { pin_role: e.target.checked ? 'start' : null });
+        }
+      });
+      li.querySelector('.wpe-pin-end').addEventListener('change', (e) => {
+        e.stopPropagation();
+        if (handlers.onUpdate) {
+          handlers.onUpdate(w.id, { pin_role: e.target.checked ? 'end' : null });
+        }
+      });
+      li.querySelector('.wpe-include-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (handlers.onUpdate) {
+          handlers.onUpdate(w.id, { included: w.included === 0 ? 1 : 0 });
+        }
       });
       listEl.appendChild(li);
     });
