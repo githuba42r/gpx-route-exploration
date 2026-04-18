@@ -17,6 +17,7 @@ import { initCreateMap, fitToWaypoints } from './map.js';
 import { renderMarkers } from '../shared/waypoint-markers.js';
 import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
+import { insertionPositionForDrag } from '../shared/insertion.js';
 import * as api from '../shared/route-api.js';
 
 // Leading-edge debounce semantics:
@@ -135,10 +136,12 @@ function clearGeneratedLayer(state) {
 //
 // The user grabs the generated Valhalla polyline — NOT an existing pin —
 // and drags to reshape the route. On drop we snap to the nearest road
-// and POST a waypoint with `position = leg.from_position + 1`. The
-// server shifts subsequent rows up by one so order stays monotonic.
+// and insert a waypoint between the two pins that bracket the drag
+// point (decided by nearest-polyline-vertex lookup, not by the leg's
+// from_position: Valhalla collapses interior through-type waypoints
+// into one leg, which would otherwise put every drag at position 1).
 
-function startLineDrag(state, line, mouseEvent) {
+function startLineDrag(state, mouseEvent) {
   // Don't interfere with right-click or Ctrl-click (context menu /
   // "drop a stop" in the map handler).
   const orig = mouseEvent.originalEvent;
@@ -157,8 +160,8 @@ function startLineDrag(state, line, mouseEvent) {
   }).addTo(state.map);
 
   const dragState = {
-    line, ghost,
-    fromPosition: line._legFromPosition,
+    ghost,
+    startLatLng: mouseEvent.latlng,
     currentLatLng: mouseEvent.latlng,
   };
   state.lineDrag = dragState;
@@ -171,10 +174,16 @@ function startLineDrag(state, line, mouseEvent) {
 
   async function onUp() {
     cleanup();
+    // Insertion position is bracketed by the CLICK origin (not the
+    // drop point): that's the segment of the route the user grabbed.
+    const { lat: startLat, lng: startLng } = dragState.startLatLng;
+    const position = insertionPositionForDrag(
+      state.waypoints || [], state.polylinePoints || [], startLat, startLng,
+    );
     const { lat, lng } = dragState.currentLatLng;
     try {
       const snap = await maybeSnapToRoad(lat, lng);
-      await api.insertWaypointAt(state.routeId, dragState.fromPosition + 1, {
+      await api.insertWaypointAt(state.routeId, position, {
         name: 'Waypoint',
         lat: snap.lat, lon: snap.lon,
         kind: 'waypoint',
@@ -201,29 +210,41 @@ function startLineDrag(state, line, mouseEvent) {
 
 function drawGeneratedRoute(state, legs) {
   clearGeneratedLayer(state);
+  state.polylinePoints = [];
   if (!legs || !legs.length) return;
 
   // Each leg renders as its own interactive polyline so the user can
-  // grab any segment and drag it to insert a waypoint mid-leg. The
-  // leg's from_position is stashed on the line — the drag handler
-  // inserts the new waypoint at from_position + 1.
+  // grab any segment and drag it to insert a waypoint mid-leg. We also
+  // keep a flat concatenation of vertices on state so the line-drag
+  // handler can project the drag point onto the closest-bracketing
+  // waypoint pair — `leg.from_position` alone is unreliable when
+  // Valhalla collapses through-type waypoints into one leg.
   const group = L.featureGroup();
+  const flat = [];
   let drewAnyLeg = false;
-  legs.forEach((leg, i) => {
+  legs.forEach((leg) => {
     if (!leg.polyline) return;
     const latlngs = decodePolyline(leg.polyline, 6);
     if (latlngs.length < 2) return;
     const line = L.polyline(latlngs, {
       color: state.routeColor, weight: 4, opacity: 0.9, interactive: true,
     });
-    line._legFromPosition = (leg.from_position != null) ? leg.from_position : i;
-    line.on('mousedown', (ev) => startLineDrag(state, line, ev));
+    line.on('mousedown', (ev) => startLineDrag(state, ev));
     group.addLayer(line);
+    // Concatenate; drop the duplicate shared vertex at the seam.
+    if (flat.length && latlngs.length
+        && flat[flat.length - 1][0] === latlngs[0][0]
+        && flat[flat.length - 1][1] === latlngs[0][1]) {
+      for (let i = 1; i < latlngs.length; i++) flat.push(latlngs[i]);
+    } else {
+      for (const p of latlngs) flat.push(p);
+    }
     drewAnyLeg = true;
   });
   if (!drewAnyLeg) return;
   group.addTo(state.map);
   state.generatedLayer = group;
+  state.polylinePoints = flat;
   // Generated route just landed — hide the dashed preview underneath.
   updatePreviewLine(state);
 }
@@ -873,6 +894,7 @@ async function main() {
     markers: [],
     previewLine: null,
     generatedLayer: null,
+    polylinePoints: [],  // flat concatenation of every drawn leg's vertices
     currentVersion: 0,
     generatedVersion: -1,
     autoGenerate: false,
@@ -903,6 +925,13 @@ async function main() {
   // Playwright + debug hook: expose state so tests can assert on or
   // nudge it without reimplementing the whole edit/generate cycle.
   window.__appState = state;
+  // Tests also call the line-drag bracket logic directly with known
+  // lat/lngs — more reliable than simulating SVG hit-tests through the
+  // mouse driver, especially when legs collapse interior waypoints.
+  window.__computeInsertionPosition = (lat, lng) =>
+    insertionPositionForDrag(
+      state.waypoints || [], state.polylinePoints || [], lat, lng,
+    );
 
   const editor = mountWaypointEditor(
     document.getElementById('editor-panel'),

@@ -1,6 +1,10 @@
 """Playwright E2E tests for the Create Route page."""
 
+import json
+import requests as http_requests
 from playwright.sync_api import expect
+
+from server.routing.gpx_writer import encode_polyline
 
 
 def _click_map_at(page, selector, x_frac, y_frac):
@@ -941,3 +945,90 @@ def test_line_drag_inserts_waypoint_between_neighbours(page, server_url):
     )
     assert [w["position"] for w in listing] == [0, 1, 2], listing
     assert listing[1]["kind"] == "waypoint", listing[1]
+
+
+def test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route(page, server_url):
+    """Regression: 6 waypoints of kind=waypoint collapse into a single
+    Valhalla leg with from_position=0. Using that value verbatim would
+    insert every drag between WP1 and WP2. The insertion helper must
+    instead bracket the drag position by the nearest included
+    waypoints so a drag near the WP5–WP6 segment lands at position 5."""
+    # Six waypoints in a straight line along decreasing lat.
+    wp_coords = [(-27.40 - 0.01 * i, 152.95) for i in range(6)]
+
+    # Build a route with 6 kind=waypoint entries via the API so the test
+    # doesn't depend on the click-to-add UI (more deterministic).
+    r = http_requests.post(f"{server_url}/api/routes",
+                           json={"title": "drag-reg"},
+                           headers={"Content-Type": "application/json"})
+    rid = r.json()["id"]
+    for i, (lat, lon) in enumerate(wp_coords):
+        http_requests.post(
+            f"{server_url}/api/routes/{rid}/waypoints",
+            json={"name": f"WP{i + 1}", "lat": lat, "lon": lon,
+                  "kind": "waypoint"},
+        )
+
+    # Mock snap so drop coords pass through untouched.
+    page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
+        status=200, content_type="application/json", body='[{"edges":[]}]',
+    ))
+
+    # Mock /generate: with 6 kind=waypoint entries Valhalla returns one
+    # leg with from_position=0, to_position=5 (the extremes) and a
+    # polyline that threads through every waypoint.
+    poly = encode_polyline(wp_coords, precision=6)
+    body = json.dumps({
+        "legs_count": 1, "distance_km": 1.0, "duration_s": 600,
+        "gpx_url": f"/api/gpx/{rid}",
+        "legs": [{
+            "from_position": 0, "to_position": 5,
+            "distance_m": 1000, "duration_s": 600, "polyline": poly,
+        }],
+    })
+    page.route(f"**/api/routes/{rid}/generate",
+               lambda route: route.fulfill(status=200, content_type="application/json", body=body))
+
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(f"{server_url}/create?route_id={rid}")
+    page.wait_for_function("() => window.__appReady === true", timeout=10000)
+    expect(page.locator(".wpe-item")).to_have_count(6, timeout=5000)
+
+    # Manually trigger generate so the polyline gets drawn.
+    page.locator("#btn-gen-primary").click()
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => p.classList.contains('leaflet-interactive') "
+        "           && !p.getAttribute('stroke-dasharray'))",
+        timeout=5000,
+    )
+
+    # Ask the page directly which position a drop roughly between WP5
+    # (index 4) and WP6 (index 5) would target. Midpoint lat = average
+    # of the two waypoint lats.
+    mid_lat = (wp_coords[4][0] + wp_coords[5][0]) / 2
+    mid_lon = wp_coords[4][1]
+    target = page.evaluate(
+        "(args) => window.__computeInsertionPosition(args[0], args[1])",
+        [mid_lat, mid_lon],
+    )
+    assert target == 5, (
+        f"drag between WP5 and WP6 (positions 4 and 5) should insert at "
+        f"position 5, got {target}"
+    )
+
+    # Drop between WP1 and WP2 → position 1.
+    mid_lat_early = (wp_coords[0][0] + wp_coords[1][0]) / 2
+    target_early = page.evaluate(
+        "(args) => window.__computeInsertionPosition(args[0], args[1])",
+        [mid_lat_early, wp_coords[0][1]],
+    )
+    assert target_early == 1, f"drag between WP1 and WP2 should insert at 1, got {target_early}"
+
+    # Drop between WP3 and WP4 → position 3.
+    mid_lat_mid = (wp_coords[2][0] + wp_coords[3][0]) / 2
+    target_mid = page.evaluate(
+        "(args) => window.__computeInsertionPosition(args[0], args[1])",
+        [mid_lat_mid, wp_coords[0][1]],
+    )
+    assert target_mid == 3, f"drag between WP3 and WP4 should insert at 3, got {target_mid}"
