@@ -14,10 +14,25 @@
   <input id="route-title" type="text" placeholder="Route title…" value="Untitled Route">
   <span id="create-hint">Click = drop waypoint · Ctrl+click = drop stop · right-click a pin for more · dashed line = preview.</span>
   <div style="flex:1;"></div>
-  <select id="route-profile" disabled title="Profile selection ships in M3">
-    <option value="bicycle">Bike</option>
+  <!-- Preset dropdown — replaces the M1 disabled profile picker. -->
+  <label for="route-preset" style="margin-right:4px;">Preset:</label>
+  <select id="route-preset" title="Routing preset — controls profile, surface preference, hill tolerance">
+    <option value="">loading…</option>
   </select>
-  <button id="btn-optimise" type="button" disabled title="Optimisation ships in M3. When it does, you'll be able to pin stops to lock their order — until then the first pin IS the start.">Optimise</button>
+  <button id="btn-toggle-custom" type="button" title="Custom costing overrides">⚙</button>
+
+  <!-- Round-trip toggle. -->
+  <label for="route-round-trip" style="margin-left:8px;">
+    <input type="checkbox" id="route-round-trip"> Round trip
+  </label>
+
+  <!-- Max-gradient warning threshold (M3c uses this). -->
+  <label for="route-max-grad" style="margin-left:8px;" title="Flag legs whose smoothed gradient exceeds this percent">
+    Warn &gt;
+    <input type="number" id="route-max-grad" min="0" max="30" step="0.5" style="width:4em;">
+    %
+  </label>
+  <button id="btn-optimise" type="button" disabled title="Optimisation wired in M3b — pin stops via the sidebar checkboxes to lock order.">Optimise</button>
 
   <!-- Single split-button for everything Generate-related. The primary
        button's appearance changes with state (manual / ready / debounce /
@@ -40,6 +55,22 @@
   <span id="generate-status" class="gen-status-idle" aria-live="polite">Idle</span>
 
   <button id="btn-save" type="button">Save</button>
+</div>
+
+<div id="custom-costing-panel" style="display:none;">
+  <strong>Custom costing</strong>
+  <label>Roads <input type="range" id="cc-use-roads" min="0" max="1" step="0.05"></label>
+  <label>Hills <input type="range" id="cc-use-hills" min="0" max="1" step="0.05"></label>
+  <label>Avoid bad surfaces <input type="range" id="cc-avoid-surfaces" min="0" max="1" step="0.05"></label>
+  <label>Bicycle type
+    <select id="cc-bicycle-type">
+      <option value="">(preset)</option>
+      <option value="Road">Road</option>
+      <option value="Hybrid">Hybrid</option>
+      <option value="Mountain">Mountain</option>
+      <option value="Cross">Cross</option>
+    </select>
+  </label>
 </div>
 
 <!-- Full-width error panel — appears when /generate fails, replaces the old alert(). -->

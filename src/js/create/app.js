@@ -863,6 +863,80 @@ function validColor(v) {
   return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v : null;
 }
 
+// -------------------- options UI (M3a) --------------------
+
+async function initOptionsUI(state) {
+  const presetSelect = document.getElementById('route-preset');
+  try {
+    const presets = await api.getRoutingPresets();
+    presetSelect.innerHTML = presets.map(
+      p => `<option value="${p.name}">${p.name}</option>`,
+    ).join('');
+  } catch (err) {
+    console.error('failed to load presets', err);
+    presetSelect.innerHTML = '<option value="road">road</option>';
+  }
+  presetSelect.value = state.currentPreset || 'road';
+
+  presetSelect.addEventListener('change', async () => {
+    await api.patchRouteOptions(state.routeId, {
+      costing_preset: presetSelect.value,
+    });
+    state.currentPreset = presetSelect.value;
+    document.getElementById('custom-costing-panel').style.display =
+      presetSelect.value === 'custom' ? 'flex' : 'none';
+    markNeedsRegen(state);
+  });
+
+  document.getElementById('btn-toggle-custom').addEventListener('click', () => {
+    const panel = document.getElementById('custom-costing-panel');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  });
+
+  const rtCb = document.getElementById('route-round-trip');
+  rtCb.addEventListener('change', async () => {
+    await api.patchRouteOptions(state.routeId, { round_trip: rtCb.checked });
+    markNeedsRegen(state);
+  });
+
+  const mgInput = document.getElementById('route-max-grad');
+  mgInput.addEventListener('change', async () => {
+    const v = mgInput.value === '' ? null : Number(mgInput.value);
+    await api.patchRouteOptions(state.routeId, { max_gradient_warn: v });
+    // Does NOT invalidate legs — M3c's post-processor re-runs on next
+    // generate only.
+  });
+
+  const sliders = ['cc-use-roads', 'cc-use-hills', 'cc-avoid-surfaces', 'cc-bicycle-type'];
+  sliders.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', async () => {
+      const opts = {};
+      const ur = document.getElementById('cc-use-roads').value;
+      const uh = document.getElementById('cc-use-hills').value;
+      const as = document.getElementById('cc-avoid-surfaces').value;
+      const bt = document.getElementById('cc-bicycle-type').value;
+      if (ur !== '') opts.use_roads = Number(ur);
+      if (uh !== '') opts.use_hills = Number(uh);
+      if (as !== '') opts.avoid_bad_surfaces = Number(as);
+      if (bt) opts.bicycle_type = bt;
+      presetSelect.value = 'custom';
+      state.currentPreset = 'custom';
+      await api.patchRouteOptions(state.routeId, {
+        costing_preset: 'custom',
+        costing_options: opts,
+      });
+      markNeedsRegen(state);
+    });
+  });
+}
+
+function markNeedsRegen(state) {
+  const gc = document.getElementById('generate-control');
+  if (gc) gc.dataset.variant = 'ready';
+  setStatus('Options changed — regenerate', 'ready');
+}
+
 // -------------------- main --------------------
 
 async function main() {
@@ -939,6 +1013,8 @@ async function main() {
   // edits. Stashing the editor on state avoids threading it through
   // every call site.
   state.editor = editor;
+
+  await initOptionsUI(state);
 
   await reloadWaypoints(state, editor, { bump: false });
   fitToWaypoints(state.map, state.waypoints);
