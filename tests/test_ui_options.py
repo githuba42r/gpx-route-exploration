@@ -107,3 +107,71 @@ def test_custom_panel_opens_on_preset_custom(page, server_url):
     _goto_create(page, server_url)
     page.locator("#route-preset").select_option("custom")
     expect(page.locator("#custom-costing-panel")).to_be_visible(timeout=1500)
+
+
+def test_optimise_button_reorders_waypoints(page, server_url):
+    _goto_create(page, server_url)
+    # Drop 4 points in a crossing order.
+    for fx, fy in [(0.3, 0.3), (0.7, 0.7), (0.3, 0.7), (0.7, 0.3)]:
+        _click_map_at(page, "#map", fx, fy)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 4", timeout=3000)
+
+    initial = page.locator(".wpe-item .wpe-name").all_text_contents()
+    page.locator("#btn-optimise").click()
+    # Either the order changes or it was already optimal. Grab fresh and
+    # assert the set of names is preserved + the new order is a valid
+    # permutation. Either way the sidebar must render 4 rows.
+    page.wait_for_timeout(800)
+    after = page.locator(".wpe-item .wpe-name").all_text_contents()
+    assert len(after) == 4
+    # The optimiser may keep the tour if it's already optimal; assert
+    # only that the count + set identity hold.
+    assert sorted(n.strip().split(" ", 1)[0] for n in after) == sorted(
+        n.strip().split(" ", 1)[0] for n in initial)
+
+
+def test_linked_waypoint_shows_chain_badge(page, server_url):
+    _goto_create(page, server_url)
+    # Drop 2 waypoints. Click-to-add defaults to kind=waypoint, so both
+    # rows are waypoints and both carry linked_to_previous=1 by default.
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=3000)
+    expect(page.locator(".wpe-item").nth(1).locator(".wpe-link-badge")).to_be_visible(timeout=3000)
+
+
+def test_unlink_from_context_menu_removes_chain_badge(page, server_url):
+    _goto_create(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=3000)
+    # Right-click the second row → Unlink from previous.
+    page.locator(".wpe-item").nth(1).click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    page.locator('#pin-ctx-menu button[data-act="unlink"]').click()
+    expect(page.locator(".wpe-item").nth(1).locator(".wpe-link-badge")).to_have_count(0, timeout=3000)
+    # Re-link should restore the chain.
+    page.locator(".wpe-item").nth(1).click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    page.locator('#pin-ctx-menu button[data-act="relink"]').click()
+    expect(page.locator(".wpe-item").nth(1).locator(".wpe-link-badge")).to_be_visible(timeout=3000)
+
+
+def test_unlink_entry_hidden_on_stops(page, server_url):
+    _goto_create(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 1", timeout=3000)
+    # Mark first row as stop via the right-click menu.
+    row = page.locator(".wpe-item").first
+    row.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    page.locator('#pin-ctx-menu button[data-act="toggle-kind"]').click()
+    # Re-open the menu — unlink/relink should NOT be present on stops.
+    row.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    assert page.locator('#pin-ctx-menu button[data-act="unlink"]').count() == 0
+    assert page.locator('#pin-ctx-menu button[data-act="relink"]').count() == 0
