@@ -29,7 +29,8 @@ def get_waypoint(waypoint_id, route_id):
 
 def append_waypoint(route_id, *, name, lat, lon, kind,
                     address=None, description=None,
-                    included=1, pin_role=None, dwell_minutes=0):
+                    included=1, pin_role=None, dwell_minutes=0,
+                    linked_to_previous=1):
     db = get_db()
     next_pos_row = db.execute(
         "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM route_waypoints WHERE route_id = ?",
@@ -40,11 +41,11 @@ def append_waypoint(route_id, *, name, lat, lon, kind,
         """
         INSERT INTO route_waypoints (
             route_id, position, kind, name, address, lat, lon,
-            included, pin_role, dwell_minutes, description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            included, pin_role, dwell_minutes, description, linked_to_previous
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (route_id, position, kind, name, address, lat, lon,
-         included, pin_role, dwell_minutes, description),
+         included, pin_role, dwell_minutes, description, linked_to_previous),
     )
     db.commit()
     return get_waypoint(cur.lastrowid, route_id)
@@ -52,7 +53,8 @@ def append_waypoint(route_id, *, name, lat, lon, kind,
 
 def insert_waypoint_at(route_id, position, *, name, lat, lon, kind,
                        address=None, description=None,
-                       included=1, pin_role=None, dwell_minutes=0):
+                       included=1, pin_role=None, dwell_minutes=0,
+                       linked_to_previous=1):
     """Insert a waypoint at `position`, shifting every existing waypoint
     with position >= `position` up by one. Uses the same two-phase
     negate-then-fold trick as reorder_waypoints to keep the
@@ -69,11 +71,11 @@ def insert_waypoint_at(route_id, position, *, name, lat, lon, kind,
         """
         INSERT INTO route_waypoints (
             route_id, position, kind, name, address, lat, lon,
-            included, pin_role, dwell_minutes, description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            included, pin_role, dwell_minutes, description, linked_to_previous
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (route_id, position, kind, name, address, lat, lon,
-         included, pin_role, dwell_minutes, description),
+         included, pin_role, dwell_minutes, description, linked_to_previous),
     )
     # Phase 3: fold the shifted rows to their new, bumped positions.
     # For a row that was originally P, we set position = -(P+2),
@@ -93,7 +95,7 @@ def update_waypoint(waypoint_id, route_id, **fields):
     via reorder_waypoints."""
     allowed = {"name", "address", "kind", "lat", "lon",
                "included", "pin_role", "dwell_minutes", "description",
-               "arrival_time"}
+               "arrival_time", "linked_to_previous"}
     # Fields in NULLABLE may be set to NULL explicitly (e.g. clearing pin_role).
     NULLABLE = {"pin_role", "address", "description", "arrival_time"}
     updates = {k: v for k, v in fields.items()

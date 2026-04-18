@@ -46,6 +46,8 @@ def append_waypoint(route_id):
         dwell_minutes=int(data.get("dwell_minutes") or 0),
         pin_role=data.get("pin_role"),
     )
+    if "linked_to_previous" in data:
+        common["linked_to_previous"] = 1 if data["linked_to_previous"] else 0
     # Optional `position` turns this into an insert-at-position (used by
     # the line-drag feature). Absent → append at tail (original M1 behaviour).
     raw_position = data.get("position")
@@ -72,6 +74,8 @@ def patch_waypoint(route_id, wpt_id):
     data = request.get_json(silent=True) or {}
     if "kind" in data and data["kind"] not in VALID_KINDS:
         return jsonify({"error": "kind must be 'stop' or 'waypoint'"}), 400
+    if "linked_to_previous" in data:
+        data["linked_to_previous"] = 1 if data["linked_to_previous"] else 0
     updated = wp_model.update_waypoint(wpt_id, route_id, **data)
     return jsonify(updated), 200
 

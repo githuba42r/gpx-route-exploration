@@ -26,6 +26,12 @@ def _apply_runtime_migrations(db):
         # Create page. SQLite doesn't have IF NOT EXISTS for ADD COLUMN,
         # so we probe via PRAGMA table_info.
         ("route_waypoints", "arrival_time", "TEXT"),
+        # M3b: link a waypoint to its predecessor so the 2-opt optimiser
+        # moves them as a unit (shape-waypoints ride with their preceding
+        # stop through reorders). DEFAULT 1 across kinds is safe because
+        # the optimiser's grouping logic treats each stop as a new group
+        # regardless of this flag — see plan decision D2.
+        ("route_waypoints", "linked_to_previous", "INTEGER NOT NULL DEFAULT 1"),
     ]
     for table, column, coltype in migrations:
         cols = {r[1] for r in db.execute(f"PRAGMA table_info({table})").fetchall()}

@@ -310,3 +310,40 @@ def test_insert_waypoint_at_zero_shifts_everything(app):
         rows = wp_model.list_waypoints(route["id"])
         assert [r["name"] for r in rows] == ["A", "B", "C"]
         assert [r["position"] for r in rows] == [0, 1, 2]
+
+
+def test_linked_to_previous_column_exists(app):
+    """M3b-1 migration adds the linked_to_previous column."""
+    with app.app_context():
+        db = get_db()
+        cols = {r[1] for r in db.execute("PRAGMA table_info(route_waypoints)").fetchall()}
+        assert "linked_to_previous" in cols
+
+
+def test_linked_to_previous_defaults_to_1(app):
+    """Newly-appended waypoints default to linked=1 regardless of kind."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Link default")
+        w = wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0, kind="waypoint")
+        assert w["linked_to_previous"] == 1
+        w2 = wp_model.append_waypoint(route["id"], name="B", lat=0, lon=0, kind="stop")
+        assert w2["linked_to_previous"] == 1
+
+
+def test_linked_to_previous_can_be_set_on_append(app):
+    """Caller may explicitly pass linked_to_previous=0 to opt out."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Link explicit")
+        w = wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0,
+                                     kind="waypoint", linked_to_previous=0)
+        assert w["linked_to_previous"] == 0
+
+
+def test_linked_to_previous_can_be_toggled_via_update(app):
+    """update_waypoint accepts linked_to_previous."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Link toggle")
+        w = wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0, kind="waypoint")
+        assert w["linked_to_previous"] == 1
+        updated = wp_model.update_waypoint(w["id"], route["id"], linked_to_previous=0)
+        assert updated["linked_to_previous"] == 0

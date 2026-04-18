@@ -138,3 +138,41 @@ def test_post_without_position_still_appends(client):
                     json={"name": "B", "lat": 1, "lon": 1, "kind": "stop"})
     assert r.status_code == 201
     assert r.get_json()["position"] == 1
+
+
+def test_post_waypoint_accepts_linked_to_previous(client, app):
+    """POST /waypoints accepts linked_to_previous=0 to opt out of linkage."""
+    rid = client.post("/api/routes", json={"title": "L"},
+                      content_type="application/json").get_json()["id"]
+    resp = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+        "linked_to_previous": 0,
+    })
+    assert resp.status_code == 201
+    assert resp.get_json()["linked_to_previous"] == 0
+
+
+def test_post_waypoint_defaults_linked_to_previous_to_1(client, app):
+    rid = client.post("/api/routes", json={"title": "L"},
+                      content_type="application/json").get_json()["id"]
+    resp = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+    })
+    assert resp.status_code == 201
+    assert resp.get_json()["linked_to_previous"] == 1
+
+
+def test_patch_waypoint_can_toggle_link(client, app):
+    rid = client.post("/api/routes", json={"title": "L"},
+                      content_type="application/json").get_json()["id"]
+    w = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+    }).get_json()
+    resp = client.patch(f"/api/routes/{rid}/waypoints/{w['id']}",
+                        json={"linked_to_previous": 0})
+    assert resp.status_code == 200
+    assert resp.get_json()["linked_to_previous"] == 0
+    # Toggle back.
+    resp = client.patch(f"/api/routes/{rid}/waypoints/{w['id']}",
+                        json={"linked_to_previous": True})
+    assert resp.get_json()["linked_to_previous"] == 1
