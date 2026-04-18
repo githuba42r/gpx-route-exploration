@@ -61,41 +61,26 @@ def generate_route(route_id):
 
     parsed_legs = vc.parse_legs(response)
 
-    # Valhalla collapses interior `through`-type locations into a single leg
-    # between adjacent `break`-type locations, so the leg count equals the
-    # number of break boundaries minus 1 (or same as breaks if round-trip,
-    # because the closing leg back to the first break is counted too).
-    # We replicate the break-determination logic from valhalla_client.build_request_body.
-    break_positions = []
-    kinds = [w.get("kind") or "stop" for w in wps]
+    # Every included waypoint is a break now (see valhalla_client.build_request_body),
+    # so Valhalla returns one leg per adjacent pair: N-1 for a linear route,
+    # N for a round trip (the closing leg back to the first waypoint counted).
     n = len(wps)
-    for i, w in enumerate(wps):
-        is_endpoint = i == 0 or i == n - 1
-        if is_endpoint or kinds[i] == "stop":
-            break_positions.append(w["position"])
-
-    expected_legs = len(break_positions) - 1
-    if opts.get("round_trip"):
-        expected_legs = len(break_positions)
-
+    expected_legs = n if opts.get("round_trip") else n - 1
     if len(parsed_legs) != expected_legs:
         return jsonify({
             "error": "Upstream routing service failed",
             "detail": (
-                f"Valhalla returned {len(parsed_legs)} legs, expected {expected_legs} "
-                f"({len(break_positions)} break-type locations: "
-                f"{len(wps) - len(break_positions)} interior waypoints collapsed into through-points)"
+                f"Valhalla returned {len(parsed_legs)} legs, "
+                f"expected {expected_legs} for {n} waypoints"
+                f"{' (round-trip)' if opts.get('round_trip') else ''}"
             ),
         }), 502
 
-    # Pair each returned leg with its from/to break-type positions. Interior
-    # `through` waypoints are silently included inside the leg's polyline.
+    # One leg per adjacent waypoint pair: from_position → to_position.
     legs_rows = []
     for i, leg in enumerate(parsed_legs):
-        from_pos = break_positions[i]
-        # Round-trip's last leg returns to break_positions[0].
-        to_pos = break_positions[(i + 1) % len(break_positions)] \
-                 if opts.get("round_trip") else break_positions[i + 1]
+        from_pos = wps[i]["position"]
+        to_pos = wps[(i + 1) % n]["position"] if opts.get("round_trip") else wps[i + 1]["position"]
         legs_rows.append({
             "from_position": from_pos,
             "to_position": to_pos,

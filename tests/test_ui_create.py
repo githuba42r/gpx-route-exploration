@@ -948,16 +948,13 @@ def test_line_drag_inserts_waypoint_between_neighbours(page, server_url):
 
 
 def test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route(page, server_url):
-    """Regression: 6 waypoints of kind=waypoint collapse into a single
-    Valhalla leg with from_position=0. Using that value verbatim would
-    insert every drag between WP1 and WP2. The insertion helper must
-    instead bracket the drag position by the nearest included
-    waypoints so a drag near the WP5–WP6 segment lands at position 5."""
-    # Six waypoints in a straight line along decreasing lat.
+    """M2 Task 7 regression: 6 waypoints produce 5 interactive polylines
+    (one per adjacent pair). Grabbing the one between WP5 and WP6 must
+    insert at position 5 — per-leg routing makes this direct (each
+    rendered line carries its own leg.from_position), so the test now
+    exercises real mouse drags against the specific leg, not a helper."""
     wp_coords = [(-27.40 - 0.01 * i, 152.95) for i in range(6)]
 
-    # Build a route with 6 kind=waypoint entries via the API so the test
-    # doesn't depend on the click-to-add UI (more deterministic).
     r = http_requests.post(f"{server_url}/api/routes",
                            json={"title": "drag-reg"},
                            headers={"Content-Type": "application/json"})
@@ -969,22 +966,24 @@ def test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route(page, se
                   "kind": "waypoint"},
         )
 
-    # Mock snap so drop coords pass through untouched.
     page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
         status=200, content_type="application/json", body='[{"edges":[]}]',
     ))
 
-    # Mock /generate: with 6 kind=waypoint entries Valhalla returns one
-    # leg with from_position=0, to_position=5 (the extremes) and a
-    # polyline that threads through every waypoint.
-    poly = encode_polyline(wp_coords, precision=6)
+    # Per-leg routing: Valhalla returns 5 legs for 6 waypoints.
+    legs = []
+    for i in range(5):
+        legs.append({
+            "from_position": i,
+            "to_position": i + 1,
+            "distance_m": 1000,
+            "duration_s": 120,
+            "polyline": encode_polyline([wp_coords[i], wp_coords[i + 1]], precision=6),
+        })
     body = json.dumps({
-        "legs_count": 1, "distance_km": 1.0, "duration_s": 600,
+        "legs_count": 5, "distance_km": 5.0, "duration_s": 600,
         "gpx_url": f"/api/gpx/{rid}",
-        "legs": [{
-            "from_position": 0, "to_position": 5,
-            "distance_m": 1000, "duration_s": 600, "polyline": poly,
-        }],
+        "legs": legs,
     })
     page.route(f"**/api/routes/{rid}/generate",
                lambda route: route.fulfill(status=200, content_type="application/json", body=body))
@@ -994,41 +993,42 @@ def test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route(page, se
     page.wait_for_function("() => window.__appReady === true", timeout=10000)
     expect(page.locator(".wpe-item")).to_have_count(6, timeout=5000)
 
-    # Manually trigger generate so the polyline gets drawn.
     page.locator("#btn-gen-primary").click()
+    # Five distinct interactive polylines rendered confirms the per-leg
+    # split is reaching the DOM.
     page.wait_for_function(
-        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
-        "  .some(p => p.classList.contains('leaflet-interactive') "
-        "           && !p.getAttribute('stroke-dasharray'))",
+        "() => document.querySelectorAll("
+        "  '.leaflet-overlay-pane path.leaflet-interactive:not([stroke-dasharray])'"
+        ").length === 5",
         timeout=5000,
     )
 
-    # Ask the page directly which position a drop roughly between WP5
-    # (index 4) and WP6 (index 5) would target. Midpoint lat = average
-    # of the two waypoint lats.
-    mid_lat = (wp_coords[4][0] + wp_coords[5][0]) / 2
-    mid_lon = wp_coords[4][1]
-    target = page.evaluate(
-        "(args) => window.__computeInsertionPosition(args[0], args[1])",
-        [mid_lat, mid_lon],
+    # Locate the exact leg whose from_position is 4 (WP5 → WP6) via the
+    # live Leaflet layer group — matching by DOM order would be fragile.
+    rect = page.evaluate(
+        """(fp) => {
+            const layers = window.__appState.generatedLayer.getLayers();
+            const line = layers.find(l => l._legFromPosition === fp);
+            if (!line || !line._path) return null;
+            const r = line._path.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        }""",
+        4,
     )
-    assert target == 5, (
-        f"drag between WP5 and WP6 (positions 4 and 5) should insert at "
-        f"position 5, got {target}"
-    )
+    assert rect, "leg with from_position=4 not found on page"
+    page.mouse.move(rect["x"], rect["y"])
+    page.mouse.down()
+    page.mouse.move(rect["x"] + 40, rect["y"] - 60, steps=6)
+    page.mouse.up()
 
-    # Drop between WP1 and WP2 → position 1.
-    mid_lat_early = (wp_coords[0][0] + wp_coords[1][0]) / 2
-    target_early = page.evaluate(
-        "(args) => window.__computeInsertionPosition(args[0], args[1])",
-        [mid_lat_early, wp_coords[0][1]],
+    # After the drag: 7 rows, fresh one at position 5.
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 7",
+        timeout=5000,
     )
-    assert target_early == 1, f"drag between WP1 and WP2 should insert at 1, got {target_early}"
-
-    # Drop between WP3 and WP4 → position 3.
-    mid_lat_mid = (wp_coords[2][0] + wp_coords[3][0]) / 2
-    target_mid = page.evaluate(
-        "(args) => window.__computeInsertionPosition(args[0], args[1])",
-        [mid_lat_mid, wp_coords[0][1]],
+    listing = page.evaluate(
+        f"() => fetch('/api/routes/{rid}/waypoints').then(r => r.json())"
     )
-    assert target_mid == 3, f"drag between WP3 and WP4 should insert at 3, got {target_mid}"
+    positions = [w["position"] for w in listing]
+    assert positions == [0, 1, 2, 3, 4, 5, 6], positions
+    assert listing[5]["kind"] == "waypoint", listing[5]

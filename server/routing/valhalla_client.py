@@ -29,16 +29,16 @@ def build_request_body(waypoints, profile, costing_options=None, round_trip=Fals
     profile: 'bicycle' | 'pedestrian' | 'auto'.
     costing_options: dict merged into costing_options[profile].
     round_trip: if True, append first waypoint at the end to close the loop.
-    kinds: optional list parallel to waypoints, each 'stop' or 'waypoint'.
-           Stops and the first/last location always become Valhalla type=break
-           (a mandatory routing stop that must snap to the network). Interior
-           waypoints become type=through, which is much more forgiving about
-           off-network locations and maps naturally to "pass through, don't
-           stop". If kinds is None, everything is a break (legacy behaviour).
+    kinds: reserved — parallel list of 'stop' / 'waypoint' per pin. We
+           ignore it when building the Valhalla request so every pin gets
+           `type: break` and Valhalla returns one leg per adjacent pair.
+           This gives us a clean 1:1 mapping between rendered legs and
+           waypoint pairs (line-drag / optimiser rely on that), and a
+           cached leg per adjacency that M3's 2-opt can consume. The
+           kind distinction remains a UI/recipe concept (dwell time,
+           marker icon, optimiser-reorderability).
     """
-    n = len(waypoints)
-    if kinds is None:
-        kinds = ["stop"] * n
+    del kinds  # explicit: not used by the Valhalla request — see docstring.
     # Per-location search radius (metres). Tells Valhalla to snap any pin
     # whose closest candidate edge is within this distance — dramatically
     # reduces the 499 "Could not find candidate edge used for destination
@@ -47,11 +47,8 @@ def build_request_body(waypoints, profile, costing_options=None, round_trip=Fals
     # route wildly far from the user's click, loose enough that clicks at
     # trail edges, park entrances, etc. still resolve.
     RADIUS_M = 100
-    locs = []
-    for i, (lat, lon) in enumerate(waypoints):
-        is_endpoint = i == 0 or i == n - 1
-        loc_type = "break" if (is_endpoint or kinds[i] == "stop") else "through"
-        locs.append({"lat": lat, "lon": lon, "type": loc_type, "radius": RADIUS_M})
+    locs = [{"lat": lat, "lon": lon, "type": "break", "radius": RADIUS_M}
+            for lat, lon in waypoints]
     if round_trip and waypoints:
         lat, lon = waypoints[0]
         locs.append({"lat": lat, "lon": lon, "type": "break", "radius": RADIUS_M})
