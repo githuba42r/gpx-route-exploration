@@ -8,8 +8,11 @@
 
 **Scope boundaries:**
 - **In:** Edit button + slide-out panel, marker drag, add-by-click on the map, right-click context menu reusing M1's component, Regenerate Route button, Close/Discard (just closes — M1 persists immediately so there's nothing to "discard" in the M1 sense), disabled state for recipe-less routes.
+- **In (added mid-milestone):** Line-drag on the generated Valhalla polyline to insert a new waypoint mid-leg with automatic position renumbering — see Task 6.
 - **Out (M6):** "Convert GPX to recipe" heuristic for legacy routes.
 - **Out (M3):** Costing-preset UI, round-trip, optimise.
+
+**Mid-milestone pivot note:** The original M2 shipped an inline slide-out edit panel on the Analysis page (Tasks 1–5). User feedback after that landed was that combining view + edit on one screen was confusing, so we pivoted: the Analysis page now links out to `/create?route_id=<id>` (the Create page IS the editor), and a dirty-state guard prompts before navigating with unregenerated edits. The slide-out module + its tests were removed. Task 6 below adds line-drag on top of the pivoted UX.
 
 ---
 
@@ -608,17 +611,248 @@ def test_regenerate_button_calls_generate_and_reloads(page, server_url):
 
 ---
 
-### Task 6: Manual verification + M2 close-out
+### Task 6: Line-drag to insert a waypoint (route reshape)
+
+**Feature:** On the Create page (the pivoted editor), the user can click-and-drag anywhere on the generated Valhalla route polyline — **not** on an existing pin — to create a new waypoint at the drop location. The new waypoint splices between the two waypoints that bound the dragged leg, everything below it shifts down one position, and the route regenerates.
+
+**Why here:** The pivoted M2 UX (Create page = editor) exposes the generated polyline; line-drag belongs in the same mental model as "click to add waypoint / drag pin to move". Done before M3 so optimisation has the richer edit primitives to work with.
+
+**Files:**
+- Modify: `server/models/waypoints.py` — add `insert_waypoint_at(route_id, position, ...)`.
+- Modify: `server/blueprints/api_waypoints.py` — POST accepts optional `position`.
+- Modify: `src/js/create/app.js` — draw each leg as its own interactive polyline; wire line-drag → ghost marker → insert-at-position.
+- Modify: `src/css/create.css` — cursor hint when hovering over a leg, ghost-marker style.
+- Modify: `tests/test_api_waypoints.py` — insert-at-position backend coverage.
+- Modify: `tests/test_ui_create.py` — Playwright coverage for the drag.
+
+---
+
+**Step 1 (backend model — failing test):** In `tests/test_models_waypoints.py`, add:
+```python
+def test_insert_waypoint_at_shifts_subsequent_positions(app):
+    with app.app_context():
+        rid = create_route(title="x")["id"]
+        a = wp.append_waypoint(rid, name="A", lat=0, lon=0, kind="stop")
+        b = wp.append_waypoint(rid, name="B", lat=1, lon=1, kind="stop")
+        c = wp.append_waypoint(rid, name="C", lat=2, lon=2, kind="stop")
+        # Insert X between A (position 0) and B (position 1): X goes to position 1,
+        # B shifts to 2, C to 3.
+        x = wp.insert_waypoint_at(rid, position=1,
+                                   name="X", lat=0.5, lon=0.5, kind="waypoint")
+        rows = wp.list_waypoints(rid)
+        names_in_order = [r["name"] for r in rows]
+        assert names_in_order == ["A", "X", "B", "C"]
+        positions = [r["position"] for r in rows]
+        assert positions == [0, 1, 2, 3]
+```
+
+**Step 2 (backend model — implement):** In `server/models/waypoints.py`:
+```python
+def insert_waypoint_at(route_id, position, *, name, lat, lon, kind,
+                       address=None, description=None,
+                       included=1, pin_role=None, dwell_minutes=0):
+    """Insert a waypoint at the given position, shifting every existing
+    waypoint with position >= `position` up by one to preserve the
+    UNIQUE(route_id, position) invariant."""
+    db = get_db()
+    # Phase 1: push conflicting rows out of the way by negating their
+    # positions (same two-phase technique used by reorder_waypoints).
+    db.execute(
+        "UPDATE route_waypoints SET position = -(position + 2) "
+        "WHERE route_id = ? AND position >= ?",
+        (route_id, position),
+    )
+    # Phase 2: insert at the target slot.
+    cur = db.execute(
+        """INSERT INTO route_waypoints (
+             route_id, position, kind, name, address, lat, lon,
+             included, pin_role, dwell_minutes, description
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (route_id, position, kind, name, address, lat, lon,
+         included, pin_role, dwell_minutes, description),
+    )
+    # Phase 3: fold the shifted rows back to their new, bumped positions.
+    db.execute(
+        "UPDATE route_waypoints SET position = -position - 1 "
+        "WHERE route_id = ? AND position < 0",
+        (route_id,),
+    )
+    db.commit()
+    return get_waypoint(cur.lastrowid, route_id)
+```
+Run the test: `pytest tests/test_models_waypoints.py::test_insert_waypoint_at_shifts_subsequent_positions -v` — expect PASS.
+
+**Step 3 (API — failing test):** In `tests/test_api_waypoints.py`:
+```python
+def test_append_with_position_inserts_and_shifts(client):
+    r = client.post("/api/routes", json={"title": "r"}, content_type="application/json")
+    rid = r.get_json()["id"]
+    for i, name in enumerate(["A", "B", "C"]):
+        client.post(f"/api/routes/{rid}/waypoints",
+                    json={"name": name, "lat": i, "lon": i, "kind": "stop"})
+    # Insert X at position 1 (between A and B).
+    resp = client.post(f"/api/routes/{rid}/waypoints",
+                       json={"name": "X", "lat": 0.5, "lon": 0.5,
+                             "kind": "waypoint", "position": 1})
+    assert resp.status_code == 201
+    listing = client.get(f"/api/routes/{rid}/waypoints").get_json()
+    assert [w["name"] for w in listing] == ["A", "X", "B", "C"]
+```
+
+**Step 4 (API — implement):** In `server/blueprints/api_waypoints.py::append_waypoint`, branch on `position`:
+```python
+position = data.get("position")
+common = dict(
+    name=data.get("name") or "Waypoint",
+    lat=data.get("lat"),
+    lon=data.get("lon"),
+    kind=kind,
+    address=data.get("address"),
+    description=data.get("description"),
+    dwell_minutes=int(data.get("dwell_minutes") or 0),
+    pin_role=data.get("pin_role"),
+)
+if position is None:
+    wp = wp_model.append_waypoint(route_id, **common)
+else:
+    wp = wp_model.insert_waypoint_at(route_id, position=int(position), **common)
+```
+Run: `pytest tests/test_api_waypoints.py -v` — expect green.
+
+**Step 5 (frontend drawing — one polyline per leg):** In `src/js/create/app.js`, change `drawGeneratedRoute` so each leg becomes its own `L.polyline` with `interactive: true`, tagged with `leg.from_position`:
+```javascript
+function drawGeneratedRoute(state, legs) {
+  clearGeneratedLayer(state);
+  if (!legs.length) return;
+  const group = L.featureGroup().addTo(state.map);
+  legs.forEach((leg, i) => {
+    if (!leg.polyline) return;
+    const latlngs = decodePolyline(leg.polyline, 6);
+    if (latlngs.length < 2) return;
+    const line = L.polyline(latlngs, {
+      color: state.routeColor, weight: 4, opacity: 0.9, interactive: true,
+    });
+    line._legFromPosition = leg.from_position ?? i;
+    line.on('mousedown', (ev) => startLineDrag(state, line, ev));
+    group.addLayer(line);
+  });
+  state.generatedLayer = group;
+  updatePreviewLine(state);
+}
+```
+The `applyColors` helper iterates `state.generatedLayer.eachLayer(l => l.setStyle(...))` now that it's a group.
+
+**Step 6 (line-drag handler):** Implement `startLineDrag` in the same file. Strategy:
+- On mousedown, disable `map.dragging`; record the clicked `leg._legFromPosition` and the current latlng.
+- Create a `L.circleMarker` ghost at the pointer position.
+- Track `mousemove` on the map container: update ghost latlng.
+- On `mouseup`: re-enable `map.dragging`, read the ghost's final latlng, call `maybeSnapToRoad()` (reuse M1 helper), then POST:
+  ```js
+  await fetch(`/api/routes/${state.routeId}/waypoints`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Waypoint',
+      lat: final.lat, lon: final.lon,
+      kind: 'waypoint',
+      position: line._legFromPosition + 1,
+    }),
+  });
+  ```
+- On success: refresh `state.waypoints` from the server, re-render markers + sidebar, bump `state.currentVersion`, trigger auto-regenerate if enabled. Clean up the ghost either way.
+
+Keep the handler compact (~60 lines). Pull the mousemove / mouseup listeners on `document` (not the map container) so a fast drag that leaves the map still ends cleanly; remove them in a shared `cleanup()`.
+
+**Step 7 (CSS affordance):** In `src/css/create.css`:
+```css
+/* Hovering over a generated leg signals "drag me". */
+.leaflet-interactive { cursor: crosshair; }
+#map.is-dragging-line .leaflet-interactive { cursor: grabbing; }
+
+/* Ghost marker following the cursor during a line-drag. */
+.route-drag-ghost {
+  pointer-events: none;
+  stroke: #fff;
+  stroke-width: 2;
+  fill: var(--preview-color, #00e5ff);
+  fill-opacity: 0.9;
+}
+```
+Toggle `is-dragging-line` on `#map` from the drag handler so the cursor stays `grabbing` even when the pointer leaves the polyline.
+
+**Step 8 (Playwright — failing test):** In `tests/test_ui_create.py`:
+```python
+def test_line_drag_inserts_waypoint_between_neighbours(page, server_url, monkeypatch_valhalla):
+    """Drag on the generated route polyline → new waypoint inserted between
+    the two pins that bound that leg; the list renumbers in order."""
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(f"{server_url}/create")
+    page.wait_for_function("() => window.__appReady === true", timeout=10000)
+
+    # Drop two pins — Generate Now (mocked Valhalla returns 1 leg).
+    _click_map_at(page, "#map", 0.3, 0.5)
+    _click_map_at(page, "#map", 0.7, 0.5)
+    page.locator("#btn-gen-primary").click()
+    # Wait for the generated polyline to exist (a single leg group).
+    page.wait_for_selector(".leaflet-interactive[stroke]", timeout=5000)
+
+    # Drag from roughly the midpoint of the rendered leg to a new position.
+    box = page.locator("#map").bounding_box()
+    page.mouse.move(box["x"] + 0.5 * box["width"], box["y"] + 0.5 * box["height"])
+    page.mouse.down()
+    page.mouse.move(box["x"] + 0.5 * box["width"], box["y"] + 0.3 * box["height"], steps=10)
+    page.mouse.up()
+
+    # Sidebar now has three rows — the new one at position 1 (between 0 and 2).
+    expect(page.locator(".wpe-item")).to_have_count(3, timeout=5000)
+    positions = page.evaluate(
+        "() => Array.from(document.querySelectorAll('.wpe-item'))"
+        ".map(el => parseInt(el.dataset.position, 10))"
+    )
+    assert positions == [0, 1, 2], positions
+```
+(If Valhalla isn't easily mockable at this level, use a fixture that patches `POST /api/routes/<id>/generate` with a two-point synthesised polyline via `page.route(...)` — same pattern as `test_regenerate_button_calls_generate_and_reloads`.)
+
+**Step 9 (run + fix until green):**
+```
+pytest tests/test_models_waypoints.py tests/test_api_waypoints.py -v
+pytest tests/test_ui_create.py::test_line_drag_inserts_waypoint_between_neighbours -v
+```
+
+**Step 10 (commit):**
+```
+git add server/models/waypoints.py server/blueprints/api_waypoints.py \
+        src/js/create/app.js src/css/create.css \
+        tests/test_models_waypoints.py tests/test_api_waypoints.py \
+        tests/test_ui_create.py
+npm run build
+git add server/static/dist/  # only if bundles are tracked
+git commit -m "feat(create): drag the generated route to insert a waypoint mid-leg"
+```
+
+**Acceptance:**
+- Hovering the generated polyline shows a crosshair cursor.
+- Drag on a leg creates a ghost that follows the pointer.
+- Drop inserts a waypoint with `position = leg.from_position + 1`; downstream positions shift.
+- Snap-to-road applies to the drop point (reuses M1's 10 m threshold).
+- Auto-regenerate (if enabled) fires once; manual mode marks the page dirty.
+- Sidebar rows render in `position` order — no gaps, no duplicates.
+
+---
+
+### Task 7: Manual verification + M2 close-out
 
 - [ ] Start dev server: `./dev.sh --env-file .env.development`.
 - [ ] Create a recipe route via `/create`, drop some pins, Generate → land on analysis page.
-- [ ] Click **Edit Route** in the nav — panel slides in.
-- [ ] Drag a marker, observe status "Edits pending".
-- [ ] Right-click a marker → context menu works (toggle kind, include/exclude, delete).
-- [ ] Ctrl+click on map inside edit mode → drops a stop.
-- [ ] Click "Regenerate Route" — Valhalla runs, page reloads, new track + gradient visible.
-- [ ] Open a legacy (GPX-only) route — Edit button disabled with tooltip.
-- [ ] Run full suites: `pytest tests/test_ui_analysis.py tests/test_ui_create.py tests/test_ui_edit_panel.py`.
+- [ ] Analysis page: click **Edit Route** → lands on `/create?route_id=<id>` with the recipe loaded.
+- [ ] Drag a pin on the map → sidebar auto-regenerates (or marks dirty in manual mode).
+- [ ] Right-click a pin → context menu (toggle kind, include/exclude, delete).
+- [ ] Ctrl+click on an empty area → new stop appears.
+- [ ] **Line-drag** on the generated route polyline → ghost follows the cursor, drop inserts a waypoint between the correct neighbours; sidebar reflows in order; auto-regenerate picks it up.
+- [ ] Create page: **Route Analysis** nav link returns to `/route/<id>`.
+- [ ] Make an edit but don't regenerate, click Library → confirm dialog offers Regenerate-then-leave vs. Leave-anyway.
+- [ ] Open a legacy (GPX-only) route → Edit button in Analysis nav disabled with tooltip.
+- [ ] Run full suites: `pytest tests/test_ui_analysis.py tests/test_ui_create.py tests/test_ui_edit_panel.py tests/test_ui_library.py`.
 
 - [ ] Append a `**M2 verified:**` line to the bottom of this plan.
 - [ ] Hand back to the user (do not merge — same pattern as M1).
