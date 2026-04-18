@@ -11,6 +11,7 @@ from server.models import get_db
 from server.models import waypoints as wp_model
 from server.models.routes import get_route
 from server.models.categories import get_category
+from server.routing import optimiser
 from server.routing import presets
 from server.routing import valhalla_client as vc
 from server.routing.gpx_writer import write_track_gpx
@@ -198,3 +199,46 @@ def patch_route_options(route_id):
 
     updated = wp_model.update_options(route_id, **patch)
     return jsonify(updated), 200
+
+
+@bp.route("/routes/<int:route_id>/optimise", methods=["POST"])
+def optimise_route(route_id):
+    """Run NN + 2-opt over groups, persist the new order, stamp the
+    last_optimised_at timestamp so frontends can tell when a stale flag
+    toggle (M3b-6) invalidates the result."""
+    user_id = get_current_user()
+    route = get_route(user_id, route_id)
+    if route is None:
+        return jsonify({"error": "Not found"}), 404
+
+    wps = wp_model.list_waypoints(route_id)
+    included = [w for w in wps if w.get("included", 1)]
+    if len(included) < 2:
+        return jsonify({"error": "at least 2 included waypoints required"}), 400
+
+    # Cost matrix from cached legs — real network distance beats haversine
+    # whenever we already have it. Legs are symmetric for our purposes
+    # (bicycle on a network where one-way edges are the exception).
+    cost_matrix = {}
+    wp_by_pos = {w["position"]: w for w in wps}
+    for leg in wp_model.list_legs(route_id):
+        a = wp_by_pos.get(leg["from_position"])
+        b = wp_by_pos.get(leg["to_position"])
+        if a is None or b is None:
+            continue
+        cost_matrix[(a["id"], b["id"])] = leg["distance_m"]
+        cost_matrix[(b["id"], a["id"])] = leg["distance_m"]
+
+    new_order = optimiser.optimise(included, cost_matrix=cost_matrix or None)
+
+    # Excluded rows stay in the recipe but aren't part of the optimised
+    # sequence. Park them at the tail in their prior order — simple and
+    # correct; a future iteration can slot them back next to their
+    # original neighbours.
+    excluded = [w for w in wps if not w.get("included", 1)]
+    full_order = new_order + [w["id"] for w in excluded]
+    wp_model.reorder_waypoints(route_id, full_order)
+
+    wp_model.update_options(route_id, last_optimised_at=int(time.time()))
+
+    return jsonify({"new_order": new_order}), 200
