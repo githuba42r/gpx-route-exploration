@@ -129,6 +129,40 @@ function updatePreviewLine(state) {
 
 function clearGeneratedLayer(state) {
   if (state.generatedLayer) { state.map.removeLayer(state.generatedLayer); state.generatedLayer = null; }
+  if (state.warningOverlays) {
+    for (const ov of state.warningOverlays) state.map.removeLayer(ov);
+    state.warningOverlays = null;
+  }
+}
+
+// -------------------- gradient-warning overlay (M3c) --------------------
+//
+// For every leg whose response carries a `warnings` array, overlay a
+// thicker red polyline on top of the original at each warning span.
+// Offsets are metre-distances along the leg's decoded latlngs —
+// compute cumulative distance once per leg so the slice is cheap.
+
+function drawWarningOverlay(state, leg, latlngs) {
+  if (!leg || !leg.warnings || !leg.warnings.length) return;
+  if (!state.warningOverlays) state.warningOverlays = [];
+  const cum = [0];
+  for (let i = 1; i < latlngs.length; i++) {
+    cum.push(cum[i - 1] + haversineMeters(
+      latlngs[i - 1][0], latlngs[i - 1][1],
+      latlngs[i][0], latlngs[i][1],
+    ));
+  }
+  for (const w of leg.warnings) {
+    const slice = [];
+    for (let i = 0; i < latlngs.length; i++) {
+      if (cum[i] >= w.from_m && cum[i] <= w.to_m) slice.push(latlngs[i]);
+    }
+    if (slice.length < 2) continue;
+    const overlay = L.polyline(slice, {
+      color: '#ff3f2f', weight: 8, opacity: 0.7, interactive: false,
+    }).addTo(state.map);
+    state.warningOverlays.push(overlay);
+  }
 }
 
 // -------------------- line-drag: insert waypoint mid-leg --------------------
@@ -205,6 +239,10 @@ function drawGeneratedRoute(state, legs) {
   clearGeneratedLayer(state);
   if (!legs || !legs.length) return;
 
+  // Stash on state so annotateWaypointsWithLegWarnings can reach them
+  // without threading through every call site.
+  state.legs = legs;
+
   // Per-leg routing: one interactive polyline per adjacent waypoint
   // pair, tagged with its from_position. Line-drag reads that tag
   // directly — no segment projection needed.
@@ -221,6 +259,9 @@ function drawGeneratedRoute(state, legs) {
     line.on('mousedown', (ev) => startLineDrag(state, line, ev));
     group.addLayer(line);
     drewAnyLeg = true;
+    // M3c: lay red overlay over any sub-segment whose smoothed gradient
+    // crossed max_gradient_warn at /generate time.
+    drawWarningOverlay(state, leg, latlngs);
   });
   if (!drewAnyLeg) return;
   group.addTo(state.map);
@@ -442,10 +483,27 @@ async function initialRouteDraw(state) {
 
 // -------------------- waypoint reload + change version bump --------------------
 
+function annotateWaypointsWithLegWarnings(waypoints, legs) {
+  // Decorate each waypoint with `_leg_warning_peak` iff the leg arriving
+  // at this waypoint carries any gradient warnings. The editor reads
+  // this synthetic field and renders a ⚠️ badge — see waypoint-editor.js.
+  const byTo = new Map();
+  for (const leg of (legs || [])) {
+    if (leg.warnings && leg.warnings.length > 0) {
+      const peak = Math.max(...leg.warnings.map(w => w.peak_grad_pct));
+      byTo.set(leg.to_position, peak);
+    }
+  }
+  return waypoints.map(w => ({
+    ...w,
+    _leg_warning_peak: byTo.has(w.position) ? byTo.get(w.position) : null,
+  }));
+}
+
 async function reloadWaypoints(state, editor, { bump = true } = {}) {
   state.waypoints = await api.listWaypoints(state.routeId);
   if (bump) state.currentVersion += 1;
-  editor.setWaypoints(state.waypoints);
+  editor.setWaypoints(annotateWaypointsWithLegWarnings(state.waypoints, state.legs));
   state.markers = renderMarkers(
     state.map, state.waypoints, state.markers,
     {

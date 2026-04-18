@@ -115,7 +115,7 @@ export function mountWaypointEditor(container, handlers = {}) {
         <span class="wpe-handle" title="Drag to reorder">⋮⋮</span>
         <span class="wpe-icon wpe-icon-${w.kind}">${w.kind === 'stop' ? visitN : `<span>${visitN}</span>`}</span>
         <div class="wpe-body">
-          <div class="wpe-name">${escape(w.name)}${w.pin_role ? ` <span class="wpe-badge">${w.pin_role === 'start' ? 'Start' : 'End'}</span>` : ''}${w.kind === 'waypoint' && w.linked_to_previous === 1 ? ' <span class="wpe-link-badge" title="Linked to previous — optimiser keeps these adjacent">🔗</span>' : ''}</div>
+          <div class="wpe-name">${escape(w.name)}${w.pin_role ? ` <span class="wpe-badge">${w.pin_role === 'start' ? 'Start' : 'End'}</span>` : ''}${w.kind === 'waypoint' && w.linked_to_previous === 1 ? ' <span class="wpe-link-badge" title="Linked to previous — optimiser keeps these adjacent">🔗</span>' : ''}${w._leg_warning_peak != null ? ` <span class="wpe-warn-badge" title="Peak gradient ${w._leg_warning_peak}% on leg arriving here">⚠️</span>` : ''}</div>
           <div class="wpe-sub">${escape(w.address || (w.lat != null ? `${w.lat.toFixed(4)}, ${w.lon.toFixed(4)}` : ''))}</div>
         </div>
         <button class="wpe-remove" title="Remove" type="button">✕</button>

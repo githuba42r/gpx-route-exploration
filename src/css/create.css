@@ -216,3 +216,12 @@
 #custom-costing-panel input[type="range"] {
   width: 80px;
 }
+
+/* ---------- M3c gradient warning badges ---------- */
+.wpe-warn-badge {
+  font-size: 0.9em;
+  padding: 0 3px;
+}
+.wpe-warn-badge[title] {
+  cursor: help;
+}
