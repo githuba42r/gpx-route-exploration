@@ -1,16 +1,21 @@
 """Route generation endpoints — calls Valhalla and writes the detailed GPX."""
 
+import json as _json
 import os
 import time
 
 from flask import Blueprint, current_app, jsonify, request
 
 from server.auth import get_current_user
+from server.models import get_db
 from server.models import waypoints as wp_model
 from server.models.routes import get_route
 from server.models.categories import get_category
 from server.routing import valhalla_client as vc
 from server.routing.gpx_writer import write_track_gpx
+
+ALLOWED_PROFILES = {"bicycle", "pedestrian", "auto"}
+ALLOWED_PRESETS = {"road", "gravel-mtb", "easy", "hike", "drive", "custom", "hybrid"}
 
 bp = Blueprint("api_routing", __name__, url_prefix="/api")
 
@@ -126,3 +131,53 @@ def list_legs(route_id):
     if route is None:
         return jsonify({"error": "Not found"}), 404
     return jsonify(wp_model.list_legs(route_id)), 200
+
+
+@bp.route("/routes/<int:route_id>/options", methods=["PATCH"])
+def patch_route_options(route_id):
+    user_id = get_current_user()
+    route = get_route(user_id, route_id)
+    if route is None:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(silent=True) or {}
+
+    patch = {}
+    if "profile" in data:
+        p = data["profile"]
+        if p not in ALLOWED_PROFILES:
+            return jsonify({"error": f"invalid profile: {p}"}), 400
+        patch["profile"] = p
+    if "costing_preset" in data:
+        cp = data["costing_preset"]
+        if cp not in ALLOWED_PRESETS:
+            return jsonify({"error": f"invalid costing_preset: {cp}"}), 400
+        patch["costing_preset"] = cp
+    if "costing_options" in data:
+        co = data["costing_options"]
+        if isinstance(co, dict):
+            patch["costing_options"] = _json.dumps(co)
+        elif co is None:
+            patch["costing_options"] = _json.dumps({})
+        else:
+            return jsonify({"error": "costing_options must be an object"}), 400
+    if "round_trip" in data:
+        patch["round_trip"] = 1 if bool(data["round_trip"]) else 0
+    if "max_gradient_warn" in data:
+        mg = data["max_gradient_warn"]
+        patch["max_gradient_warn"] = None if mg is None else float(mg)
+
+    # Geometry-affecting changes invalidate the leg cache. replace_legs([])
+    # drops the rows; last_generated_at is cleared via direct SQL because
+    # update_options filters None out.
+    geometry_affecting = {"profile", "costing_preset", "costing_options", "round_trip"}
+    if geometry_affecting.intersection(patch.keys()):
+        wp_model.replace_legs(route_id, [])
+        db = get_db()
+        db.execute(
+            "UPDATE route_options SET last_generated_at = NULL WHERE route_id = ?",
+            (route_id,),
+        )
+        db.commit()
+
+    updated = wp_model.update_options(route_id, **patch)
+    return jsonify(updated), 200
