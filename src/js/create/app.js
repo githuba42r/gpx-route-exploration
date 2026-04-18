@@ -179,6 +179,7 @@ function startLineDrag(state, line, mouseEvent) {
         name: 'Waypoint',
         lat: snap.lat, lon: snap.lon,
         kind: 'waypoint',
+        linked_to_previous: 1,
       });
       await onWaypointsChanged(state, state.editor);
     } catch (err) {
@@ -257,6 +258,12 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
   const included = w.included !== 0;
   const isStart = w.pin_role === 'start';
   const isEnd = w.pin_role === 'end';
+  const linked = w.linked_to_previous === 1;
+  const linkEntry = isStop
+    ? ''
+    : (linked
+        ? '<button data-act="unlink" type="button">Unlink from previous</button>'
+        : '<button data-act="relink" type="button">Re-link to previous</button>');
 
   menu.innerHTML = `
     <div class="ctx-header">${escapeHtml(w.name || (isStop ? 'Stop' : 'Waypoint'))}</div>
@@ -265,6 +272,7 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
     <div class="ctx-sep"></div>
     <button data-act="toggle-kind" type="button">${isStop ? 'Mark as Waypoint' : 'Mark as Stop'}</button>
     <button data-act="toggle-include" type="button">${included ? 'Exclude from route' : 'Include in route'}</button>
+    ${linkEntry}
     ${isStop ? '<button data-act="edit-stop" type="button">Edit stop details…</button>' : ''}
     <div class="ctx-sep"></div>
     <button data-act="delete" type="button" class="danger">Delete</button>
@@ -324,6 +332,12 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
           if (current) await api.patchWaypoint(state.routeId, current.id, { pin_role: null });
         }
         await api.patchWaypoint(state.routeId, w.id, { pin_role: nextRole });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'unlink') {
+        await api.patchWaypoint(state.routeId, w.id, { linked_to_previous: 0 });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'relink') {
+        await api.patchWaypoint(state.routeId, w.id, { linked_to_previous: 1 });
         await onWaypointsChanged(state, editor);
       } else if (act === 'edit-stop') {
         openStopEditModal(state, editor, w);
@@ -954,6 +968,25 @@ async function initOptionsUI(state) {
       });
       markNeedsRegen(state);
     });
+  });
+
+  // --- Optimise button (M3b) ---
+  const optBtn = document.getElementById('btn-optimise');
+  optBtn.disabled = false;
+  optBtn.title = 'Reorder stops for shortest route (respects pins + linked waypoints)';
+  optBtn.addEventListener('click', async () => {
+    optBtn.disabled = true;
+    setStatus('Optimising…', 'busy');
+    try {
+      await api.optimiseRoute(state.routeId);
+      await onWaypointsChanged(state, state.editor);
+      setStatus('Optimised — regenerate', 'ready');
+      markNeedsRegen(state);
+    } catch (err) {
+      setStatus('Optimise failed: ' + err.message, 'error');
+    } finally {
+      optBtn.disabled = false;
+    }
   });
 }
 

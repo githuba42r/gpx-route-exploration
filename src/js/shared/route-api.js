@@ -62,3 +62,7 @@ export function getRoutingPresets() {
 export function patchRouteOptions(routeId, patch) {
   return json('PATCH', `/api/routes/${routeId}/options`, patch);
 }
+
+export function optimiseRoute(routeId) {
+  return json('POST', `/api/routes/${routeId}/optimise`);
+}
