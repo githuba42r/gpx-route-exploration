@@ -112,3 +112,43 @@ def test_parse_legs_decodes_shape():
     assert legs[0]["distance_m"] == 2000.0  # km → m
     assert legs[0]["duration_s"] == 360.0
     assert legs[0]["polyline"] == fake["trip"]["legs"][0]["shape"]
+
+
+def test_parse_legs_includes_elevation_and_interval():
+    """parse_legs exposes per-leg elevation samples + interval when the
+    response carries them (always, since build_request_body always
+    sets elevation_interval: 10)."""
+    from server.routing.valhalla_client import parse_legs
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 1.0, "time": 300.0},
+                "shape": "abc",
+                "elevation": [10.0, 11.0, 12.5, 14.0],
+            }],
+            "summary": {"length": 1.0, "time": 300.0},
+        },
+        "elevation_interval": 10.0,
+    }
+    parsed = parse_legs(forged)
+    assert len(parsed) == 1
+    leg = parsed[0]
+    assert leg["elevation"] == [10.0, 11.0, 12.5, 14.0]
+    assert leg["elevation_interval_m"] == 10.0
+
+
+def test_parse_legs_defaults_elevation_interval_when_missing():
+    """Older responses without the echoed elevation_interval still parse."""
+    from server.routing.valhalla_client import parse_legs
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 0.5, "time": 100.0},
+                "shape": "xyz",
+            }],
+            "summary": {"length": 0.5, "time": 100.0},
+        },
+    }
+    parsed = parse_legs(forged)
+    assert parsed[0]["elevation"] == []
+    assert parsed[0]["elevation_interval_m"] == 10.0

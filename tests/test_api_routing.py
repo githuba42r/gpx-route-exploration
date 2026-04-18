@@ -267,3 +267,100 @@ def test_generate_round_trip_flag_reaches_valhalla(client, app, monkeypatch):
     resp = client.post(f"/api/routes/{rid}/generate")
     assert resp.status_code == 200
     assert captured["round_trip"] is True
+
+
+def test_generate_writes_warnings_when_threshold_crossed(client, app, monkeypatch):
+    """M3c: generate_route runs scan_legs_for_warnings and includes the
+    result on every leg of the response."""
+    rid = client.post("/api/routes", json={"title": "Steep"},
+                      content_type="application/json").get_json()["id"]
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "A", "lat": 0, "lon": 0})
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "B", "lat": 0, "lon": 0.01})
+    client.patch(f"/api/routes/{rid}/options", json={"max_gradient_warn": 10.0})
+
+    # Flat → steep → flat, hardcoded so the post-processor finds one run.
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 1.0, "time": 300.0},
+                "shape": encode_polyline([(0, 0), (0, 0.01)], precision=6),
+                "elevation": (
+                    [100.0] * 10 +
+                    [100.0 + i * 2.0 for i in range(1, 31)] +
+                    [160.0] * 10
+                ),
+            }],
+            "summary": {"length": 1.0, "time": 300.0},
+        },
+        "elevation_interval": 10.0,
+    }
+    monkeypatch.setattr(
+        "server.blueprints.api_routing.vc.call_route",
+        lambda **kw: forged,
+    )
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    leg = resp.get_json()["legs"][0]
+    assert leg["warnings"] is not None
+    assert len(leg["warnings"]) >= 1
+    assert leg["warnings"][0]["peak_grad_pct"] >= 10.0
+    # max_grade_pct signed; this is ascending → positive.
+    assert leg["max_grade_pct"] > 0
+
+
+def test_generate_no_warnings_when_threshold_null(client, app, monkeypatch):
+    rid = client.post("/api/routes", json={"title": "Flat"},
+                      content_type="application/json").get_json()["id"]
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "A", "lat": 0, "lon": 0})
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "B", "lat": 0, "lon": 0.01})
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 1.0, "time": 300.0},
+                "shape": encode_polyline([(0, 0), (0, 0.01)], precision=6),
+                "elevation": [100.0 + i * 0.1 for i in range(30)],
+            }],
+            "summary": {"length": 1.0, "time": 300.0},
+        },
+        "elevation_interval": 10.0,
+    }
+    monkeypatch.setattr(
+        "server.blueprints.api_routing.vc.call_route",
+        lambda **kw: forged,
+    )
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200
+    assert resp.get_json()["legs"][0]["warnings"] is None
+
+
+def test_generate_no_warnings_when_gradients_below_threshold(client, app, monkeypatch):
+    """max_gradient_warn is set but no sub-segment crosses it."""
+    rid = client.post("/api/routes", json={"title": "Gentle"},
+                      content_type="application/json").get_json()["id"]
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "A", "lat": 0, "lon": 0})
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"kind": "stop", "name": "B", "lat": 0, "lon": 0.01})
+    client.patch(f"/api/routes/{rid}/options", json={"max_gradient_warn": 15.0})
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 1.0, "time": 300.0},
+                "shape": encode_polyline([(0, 0), (0, 0.01)], precision=6),
+                "elevation": [100.0 + i * 0.5 for i in range(30)],  # ~5%
+            }],
+            "summary": {"length": 1.0, "time": 300.0},
+        },
+        "elevation_interval": 10.0,
+    }
+    monkeypatch.setattr(
+        "server.blueprints.api_routing.vc.call_route",
+        lambda **kw: forged,
+    )
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200
+    assert resp.get_json()["legs"][0]["warnings"] is None

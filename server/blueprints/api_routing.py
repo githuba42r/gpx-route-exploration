@@ -11,6 +11,7 @@ from server.models import get_db
 from server.models import waypoints as wp_model
 from server.models.routes import get_route
 from server.models.categories import get_category
+from server.route_postprocess import scan_legs_for_warnings
 from server.routing import optimiser
 from server.routing import presets
 from server.routing import valhalla_client as vc
@@ -111,6 +112,19 @@ def generate_route(route_id):
             "duration_s": leg["duration_s"],
             "polyline": leg["polyline"],
         })
+
+    # Post-process: elevation-aware warnings (M3c). The post-processor
+    # reads elevation samples from parsed_legs and emits
+    # {max_grade_pct, warnings} parallel to legs_rows. We persist both
+    # (writing the JSON list into the existing warnings TEXT column).
+    threshold = opts.get("max_gradient_warn")
+    post = scan_legs_for_warnings(parsed_legs, threshold)
+    for row, scanned in zip(legs_rows, post):
+        row["max_grade_pct"] = scanned["max_grade_pct"]
+        row["warnings"] = (
+            _json.dumps(scanned["warnings"]) if scanned["warnings"] else None
+        )
+
     wp_model.replace_legs(route_id, legs_rows)
     wp_model.update_options(route_id, last_generated_at=int(time.time()))
 
@@ -136,6 +150,8 @@ def generate_route(route_id):
                 "distance_m": row["distance_m"],
                 "duration_s": row["duration_s"],
                 "polyline": row["polyline"],
+                "max_grade_pct": row.get("max_grade_pct"),
+                "warnings": _json.loads(row["warnings"]) if row.get("warnings") else None,
             }
             for row in legs_rows
         ],

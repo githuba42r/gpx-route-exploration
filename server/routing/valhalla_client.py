@@ -91,9 +91,19 @@ def call_route(waypoints, profile, costing_options=None, round_trip=False, kinds
 
 def parse_legs(response):
     """Convert a Valhalla response into a list of leg dicts ready for
-    route_legs insertion. The caller assigns from_position/to_position."""
+    route_legs insertion. The caller assigns from_position/to_position.
+
+    When the request had `elevation_interval` set, every leg carries:
+      - elevation: flat list of metre samples along the shape
+      - elevation_interval_m: spacing between samples (metres)
+    Absent elevation yields [] + the default spacing — the post-processor
+    handles empty series by emitting None warnings.
+    """
     trip = response.get("trip") or {}
     legs = trip.get("legs") or []
+    # elevation_interval echoes back at the response top level; fall back
+    # to the value build_request_body always sends.
+    elevation_interval = response.get("elevation_interval", 10.0)
     out = []
     for leg in legs:
         summary = leg.get("summary") or {}
@@ -104,5 +114,7 @@ def parse_legs(response):
             "distance_m": float(length_km) * 1000.0,
             "duration_s": float(time_s),
             "polyline": shape,
+            "elevation": leg.get("elevation") or [],
+            "elevation_interval_m": float(elevation_interval),
         })
     return out
