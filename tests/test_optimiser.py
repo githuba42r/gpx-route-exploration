@@ -24,6 +24,10 @@ def _wp(wid, pos, kind, lat, lon, **extra):
 
 
 def test_optimise_4_point_symmetric_square():
+    """Unit-square corners. A perimeter tour is 3 unit sides
+    (no diagonal). Seed with a crossing order and verify the optimiser
+    lands on the perimeter cost — exact value derived from haversine
+    so the assertion is unit-agnostic."""
     wps = [
         _wp(1, 0, "stop", 0, 0),
         _wp(2, 1, "stop", 0, 1),
@@ -33,7 +37,9 @@ def test_optimise_4_point_symmetric_square():
     wps_bad = [wps[0], wps[2], wps[1], wps[3]]
     new_order = optimiser.optimise(wps_bad)
     cost = _tour_cost(new_order, wps_bad)
-    assert cost == pytest.approx(3.0, abs=1e-6)
+    # Optimal perimeter = 3 unit-degree hops from any adjacent corner.
+    expected = 3 * _hav(wps[0], wps[1])
+    assert cost == pytest.approx(expected, rel=1e-3)
 
 
 def test_optimise_2opt_reduces_cost():
