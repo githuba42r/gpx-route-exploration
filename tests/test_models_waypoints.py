@@ -259,3 +259,54 @@ def test_update_waypoint_clears_nullable_fields(app):
         # only covers the intentionally-nullable columns.
         assert cleared["name"] == "A"
         assert cleared["kind"] == "stop"
+
+
+def test_insert_waypoint_at_shifts_subsequent_positions(app):
+    """Line-drag needs a position-aware insert: the new row takes the
+    target slot, everything at or beyond that slot shifts up by one."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Insert")
+        wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0, kind="stop")
+        wp_model.append_waypoint(route["id"], name="B", lat=1, lon=1, kind="stop")
+        wp_model.append_waypoint(route["id"], name="C", lat=2, lon=2, kind="stop")
+
+        inserted = wp_model.insert_waypoint_at(
+            route["id"], position=1,
+            name="X", lat=0.5, lon=0.5, kind="waypoint",
+        )
+        assert inserted["position"] == 1
+        assert inserted["name"] == "X"
+
+        rows = wp_model.list_waypoints(route["id"])
+        assert [r["name"] for r in rows] == ["A", "X", "B", "C"]
+        assert [r["position"] for r in rows] == [0, 1, 2, 3]
+
+
+def test_insert_waypoint_at_end_matches_append(app):
+    """Inserting at position == len is the same as appending."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Insert end")
+        wp_model.append_waypoint(route["id"], name="A", lat=0, lon=0, kind="stop")
+        wp_model.append_waypoint(route["id"], name="B", lat=1, lon=1, kind="stop")
+        wp_model.insert_waypoint_at(
+            route["id"], position=2,
+            name="C", lat=2, lon=2, kind="waypoint",
+        )
+        rows = wp_model.list_waypoints(route["id"])
+        assert [r["name"] for r in rows] == ["A", "B", "C"]
+        assert [r["position"] for r in rows] == [0, 1, 2]
+
+
+def test_insert_waypoint_at_zero_shifts_everything(app):
+    """Inserting at position 0 pushes the existing head down."""
+    with app.app_context():
+        route = _create_stub_route(app, title="Insert head")
+        wp_model.append_waypoint(route["id"], name="B", lat=1, lon=1, kind="stop")
+        wp_model.append_waypoint(route["id"], name="C", lat=2, lon=2, kind="stop")
+        wp_model.insert_waypoint_at(
+            route["id"], position=0,
+            name="A", lat=0, lon=0, kind="stop",
+        )
+        rows = wp_model.list_waypoints(route["id"])
+        assert [r["name"] for r in rows] == ["A", "B", "C"]
+        assert [r["position"] for r in rows] == [0, 1, 2]

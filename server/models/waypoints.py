@@ -50,6 +50,43 @@ def append_waypoint(route_id, *, name, lat, lon, kind,
     return get_waypoint(cur.lastrowid, route_id)
 
 
+def insert_waypoint_at(route_id, position, *, name, lat, lon, kind,
+                       address=None, description=None,
+                       included=1, pin_role=None, dwell_minutes=0):
+    """Insert a waypoint at `position`, shifting every existing waypoint
+    with position >= `position` up by one. Uses the same two-phase
+    negate-then-fold trick as reorder_waypoints to keep the
+    UNIQUE(route_id, position) invariant intact mid-transaction."""
+    db = get_db()
+    # Phase 1: push conflicting rows to a disjoint negative range.
+    db.execute(
+        "UPDATE route_waypoints SET position = -(position + 2) "
+        "WHERE route_id = ? AND position >= ?",
+        (route_id, position),
+    )
+    # Phase 2: insert at the target slot.
+    cur = db.execute(
+        """
+        INSERT INTO route_waypoints (
+            route_id, position, kind, name, address, lat, lon,
+            included, pin_role, dwell_minutes, description
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (route_id, position, kind, name, address, lat, lon,
+         included, pin_role, dwell_minutes, description),
+    )
+    # Phase 3: fold the shifted rows to their new, bumped positions.
+    # For a row that was originally P, we set position = -(P+2),
+    # and we want its final position to be P+1 = -position - 1.
+    db.execute(
+        "UPDATE route_waypoints SET position = -position - 1 "
+        "WHERE route_id = ? AND position < 0",
+        (route_id,),
+    )
+    db.commit()
+    return get_waypoint(cur.lastrowid, route_id)
+
+
 def update_waypoint(waypoint_id, route_id, **fields):
     """Update any subset of: name, address, kind, lat, lon, included,
     pin_role, dwell_minutes, description. Position is handled separately

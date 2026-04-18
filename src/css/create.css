@@ -182,3 +182,18 @@
   background: transparent;
   line-height: 1;
 }
+
+/* ---------- Line-drag: grab the generated route to insert a waypoint ---------- */
+
+/* Hovering over any interactive leaflet path (our per-leg route polylines)
+ * signals "you can drag me here". The preview polyline sets interactive:false
+ * so it is unaffected. */
+#map .leaflet-interactive { cursor: crosshair; }
+
+/* Once a drag starts we tag #map with is-dragging-line; the cursor then
+ * stays as "grabbing" even when the pointer leaves the polyline (common
+ * mid-drag since the ghost moves with the mouse). */
+#map.is-dragging-line,
+#map.is-dragging-line .leaflet-interactive {
+  cursor: grabbing;
+}

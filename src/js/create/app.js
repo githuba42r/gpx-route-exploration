@@ -131,29 +131,109 @@ function clearGeneratedLayer(state) {
   if (state.generatedLayer) { state.map.removeLayer(state.generatedLayer); state.generatedLayer = null; }
 }
 
+// -------------------- line-drag: insert waypoint mid-leg --------------------
+//
+// The user grabs the generated Valhalla polyline — NOT an existing pin —
+// and drags to reshape the route. On drop we snap to the nearest road
+// and POST a waypoint with `position = leg.from_position + 1`. The
+// server shifts subsequent rows up by one so order stays monotonic.
+
+function startLineDrag(state, line, mouseEvent) {
+  // Don't interfere with right-click or Ctrl-click (context menu /
+  // "drop a stop" in the map handler).
+  const orig = mouseEvent.originalEvent;
+  if (orig && (orig.button !== 0 || orig.ctrlKey || orig.shiftKey)) return;
+  if (state.lineDrag) return;  // already dragging
+
+  // Stop Leaflet's default behaviours — panning + polyline click.
+  L.DomEvent.stopPropagation(mouseEvent);
+  L.DomEvent.preventDefault(mouseEvent);
+  state.map.dragging.disable();
+  document.getElementById('map').classList.add('is-dragging-line');
+
+  const ghost = L.circleMarker(mouseEvent.latlng, {
+    radius: 7, className: 'route-drag-ghost',
+    color: '#fff', weight: 2, fillColor: state.previewColor, fillOpacity: 0.9,
+  }).addTo(state.map);
+
+  const dragState = {
+    line, ghost,
+    fromPosition: line._legFromPosition,
+    currentLatLng: mouseEvent.latlng,
+  };
+  state.lineDrag = dragState;
+
+  function onMove(ev) {
+    const pt = state.map.mouseEventToLatLng(ev);
+    dragState.currentLatLng = pt;
+    ghost.setLatLng(pt);
+  }
+
+  async function onUp() {
+    cleanup();
+    const { lat, lng } = dragState.currentLatLng;
+    try {
+      const snap = await maybeSnapToRoad(lat, lng);
+      await api.insertWaypointAt(state.routeId, dragState.fromPosition + 1, {
+        name: 'Waypoint',
+        lat: snap.lat, lon: snap.lon,
+        kind: 'waypoint',
+      });
+      await onWaypointsChanged(state, state.editor);
+    } catch (err) {
+      console.error('line-drag insert failed', err);
+      setStatus('Insert failed: ' + err.message, 'error');
+    }
+  }
+
+  function cleanup() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    state.map.dragging.enable();
+    document.getElementById('map').classList.remove('is-dragging-line');
+    if (ghost) state.map.removeLayer(ghost);
+    state.lineDrag = null;
+  }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
 function drawGeneratedRoute(state, legs) {
   clearGeneratedLayer(state);
-  const allLatLngs = [];
-  for (const leg of legs) {
-    if (!leg.polyline) continue;
-    const decoded = decodePolyline(leg.polyline, 6);
-    if (allLatLngs.length && decoded.length && allLatLngs[allLatLngs.length - 1][0] === decoded[0][0] &&
-        allLatLngs[allLatLngs.length - 1][1] === decoded[0][1]) {
-      decoded.shift();
-    }
-    for (const p of decoded) allLatLngs.push(p);
-  }
-  if (allLatLngs.length < 2) return;
-  state.generatedLayer = L.polyline(allLatLngs, {
-    color: state.routeColor, weight: 4, opacity: 0.9, interactive: false,
-  }).addTo(state.map);
+  if (!legs || !legs.length) return;
+
+  // Each leg renders as its own interactive polyline so the user can
+  // grab any segment and drag it to insert a waypoint mid-leg. The
+  // leg's from_position is stashed on the line — the drag handler
+  // inserts the new waypoint at from_position + 1.
+  const group = L.featureGroup();
+  let drewAnyLeg = false;
+  legs.forEach((leg, i) => {
+    if (!leg.polyline) return;
+    const latlngs = decodePolyline(leg.polyline, 6);
+    if (latlngs.length < 2) return;
+    const line = L.polyline(latlngs, {
+      color: state.routeColor, weight: 4, opacity: 0.9, interactive: true,
+    });
+    line._legFromPosition = (leg.from_position != null) ? leg.from_position : i;
+    line.on('mousedown', (ev) => startLineDrag(state, line, ev));
+    group.addLayer(line);
+    drewAnyLeg = true;
+  });
+  if (!drewAnyLeg) return;
+  group.addTo(state.map);
+  state.generatedLayer = group;
   // Generated route just landed — hide the dashed preview underneath.
   updatePreviewLine(state);
 }
 
 function applyColors(state) {
   if (state.previewLine) state.previewLine.setStyle({ color: state.previewColor });
-  if (state.generatedLayer) state.generatedLayer.setStyle({ color: state.routeColor });
+  if (state.generatedLayer) {
+    // generatedLayer is a featureGroup of per-leg polylines now.
+    state.generatedLayer.eachLayer(l => l.setStyle({ color: state.routeColor }));
+  }
 }
 
 // -------------------- pin context menu --------------------
@@ -853,6 +933,12 @@ async function main() {
       },
     },
   );
+
+  // Line-drag on the generated polyline (wired in drawGeneratedRoute)
+  // needs to trigger the same downstream pipeline as other waypoint
+  // edits. Stashing the editor on state avoids threading it through
+  // every call site.
+  state.editor = editor;
 
   await reloadWaypoints(state, editor, { bump: false });
   fitToWaypoints(state.map, state.waypoints);

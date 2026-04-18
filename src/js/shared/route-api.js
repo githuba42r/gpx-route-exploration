@@ -33,6 +33,12 @@ export function appendWaypoint(routeId, { name, lat, lon, kind, address, descrip
               { name, lat, lon, kind, address, description });
 }
 
+export function insertWaypointAt(routeId, position,
+                                 { name, lat, lon, kind, address, description }) {
+  return json('POST', `/api/routes/${routeId}/waypoints`,
+              { name, lat, lon, kind, address, description, position });
+}
+
 export function patchWaypoint(routeId, wptId, patch) {
   return json('PATCH', `/api/routes/${routeId}/waypoints/${wptId}`, patch);
 }

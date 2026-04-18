@@ -103,3 +103,38 @@ def test_patch_unknown_waypoint_404(client):
     rid = _make_route(client)
     r = client.patch(f"/api/routes/{rid}/waypoints/99999", json={"name": "n"})
     assert r.status_code == 404
+
+
+def test_post_with_position_inserts_and_shifts(client):
+    """POST /waypoints with a `position` field inserts at that slot and
+    shifts subsequent rows up by one — used by the line-drag feature."""
+    rid = _make_route(client)
+    for i, name in enumerate(["A", "B", "C"]):
+        r = client.post(
+            f"/api/routes/{rid}/waypoints",
+            json={"name": name, "lat": i, "lon": i, "kind": "stop"},
+        )
+        assert r.status_code == 201
+
+    r = client.post(
+        f"/api/routes/{rid}/waypoints",
+        json={"name": "X", "lat": 0.5, "lon": 0.5,
+              "kind": "waypoint", "position": 1},
+    )
+    assert r.status_code == 201
+    assert r.get_json()["position"] == 1
+
+    listing = client.get(f"/api/routes/{rid}/waypoints").get_json()
+    assert [w["name"] for w in listing] == ["A", "X", "B", "C"]
+    assert [w["position"] for w in listing] == [0, 1, 2, 3]
+
+
+def test_post_without_position_still_appends(client):
+    """Back-compat: omitting position keeps the M1 append-at-tail behaviour."""
+    rid = _make_route(client)
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"name": "A", "lat": 0, "lon": 0, "kind": "stop"})
+    r = client.post(f"/api/routes/{rid}/waypoints",
+                    json={"name": "B", "lat": 1, "lon": 1, "kind": "stop"})
+    assert r.status_code == 201
+    assert r.get_json()["position"] == 1

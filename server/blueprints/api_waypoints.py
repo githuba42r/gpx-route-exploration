@@ -36,18 +36,26 @@ def append_waypoint(route_id):
     kind = data.get("kind")
     if kind not in VALID_KINDS:
         return jsonify({"error": "kind must be 'stop' or 'waypoint'"}), 400
+    common = dict(
+        name=data.get("name") or "Waypoint",
+        lat=data.get("lat"),
+        lon=data.get("lon"),
+        kind=kind,
+        address=data.get("address"),
+        description=data.get("description"),
+        dwell_minutes=int(data.get("dwell_minutes") or 0),
+        pin_role=data.get("pin_role"),
+    )
+    # Optional `position` turns this into an insert-at-position (used by
+    # the line-drag feature). Absent → append at tail (original M1 behaviour).
+    raw_position = data.get("position")
     try:
-        wp = wp_model.append_waypoint(
-            route_id,
-            name=data.get("name") or "Waypoint",
-            lat=data.get("lat"),
-            lon=data.get("lon"),
-            kind=kind,
-            address=data.get("address"),
-            description=data.get("description"),
-            dwell_minutes=int(data.get("dwell_minutes") or 0),
-            pin_role=data.get("pin_role"),
-        )
+        if raw_position is None:
+            wp = wp_model.append_waypoint(route_id, **common)
+        else:
+            wp = wp_model.insert_waypoint_at(
+                route_id, position=int(raw_position), **common,
+            )
     except Exception as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(wp), 201

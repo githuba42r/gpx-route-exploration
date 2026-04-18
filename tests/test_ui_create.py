@@ -861,3 +861,83 @@ def test_pin_offroad_triggers_actionable_guidance(page, server_url):
     expect(page.locator("#generate-error .err-guidance")).to_contain_text("snap")
     # Raw upstream body still shown below the guidance.
     expect(page.locator("#generate-error .err-upstream")).to_contain_text("error_code")
+
+
+def test_line_drag_inserts_waypoint_between_neighbours(page, server_url):
+    """M2 Task 6: dragging the generated Valhalla polyline inserts a new
+    waypoint at `from_position + 1`; downstream positions shift so the
+    sidebar stays in numeric order."""
+    _goto_create_fresh(page, server_url)
+
+    # Mock snap-to-road so the test doesn't depend on Valhalla /locate.
+    # Returning empty edges tells the Create page to keep the raw coords.
+    page.route("**/proxy/valhalla/locate", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='[{"edges":[]}]',
+    ))
+
+    # Mock /generate: returns a single leg with a valid polyline near the
+    # default map centre so it projects on-screen at the test viewport.
+    valid_polyline = '~rjgs@_ygsbH~oR_pR'
+    page.route("**/api/routes/*/generate", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=f'{{"legs_count":1,"distance_km":0.5,"duration_s":120,'
+             f'"gpx_url":"/api/gpx/1",'
+             f'"legs":[{{"from_position":0,"to_position":1,"distance_m":500,'
+             f'"duration_s":120,"polyline":"{valid_polyline}"}}]}}',
+    ))
+
+    # Drop two waypoints and trigger generate.
+    _click_map_at(page, "#map", 0.35, 0.5)
+    _click_map_at(page, "#map", 0.65, 0.5)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=5000)
+    page.locator("#btn-gen-primary").click()
+
+    # Wait for the generated per-leg interactive polyline to land in
+    # the overlay pane.
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('.leaflet-overlay-pane path'))"
+        "  .some(p => p.classList.contains('leaflet-interactive')"
+        "           && !p.getAttribute('stroke-dasharray'))",
+        timeout=5000,
+    )
+
+    # Look up the polyline's on-screen midpoint — SVG paths are thin so
+    # we can't just click anywhere. Using the path's bounding box gives
+    # us a pixel the hit-test will actually land on.
+    rect = page.evaluate(
+        """() => {
+            const path = Array.from(
+                document.querySelectorAll('.leaflet-overlay-pane path'))
+                .find(p => p.classList.contains('leaflet-interactive')
+                    && !p.getAttribute('stroke-dasharray'));
+            if (!path) return null;
+            const r = path.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        }"""
+    )
+    assert rect, "generated interactive polyline not found on page"
+
+    # Start the drag on the polyline, move to a clearly different point,
+    # release. The line-drag handler POSTs a waypoint at position 1.
+    page.mouse.move(rect["x"], rect["y"])
+    page.mouse.down()
+    page.mouse.move(rect["x"] + 40, rect["y"] - 80, steps=8)
+    page.mouse.up()
+
+    # Sidebar now has three rows, positions [0, 1, 2], name=Waypoint in middle.
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 3",
+        timeout=5000,
+    )
+
+    # Pull positions from the route API — it's the authoritative ordering.
+    rid = page.evaluate(
+        "() => new URL(location.href).searchParams.get('route_id')"
+    )
+    listing = page.evaluate(
+        f"() => fetch('/api/routes/{rid}/waypoints').then(r => r.json())"
+    )
+    assert [w["position"] for w in listing] == [0, 1, 2], listing
+    assert listing[1]["kind"] == "waypoint", listing[1]
