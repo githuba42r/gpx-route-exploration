@@ -54,3 +54,11 @@ export function reorderWaypoints(routeId, orderedIds) {
 export function generateRoute(routeId) {
   return json('POST', `/api/routes/${routeId}/generate`);
 }
+
+export function getRoutingPresets() {
+  return json('GET', '/api/routing-presets');
+}
+
+export function patchRouteOptions(routeId, patch) {
+  return json('PATCH', `/api/routes/${routeId}/options`, patch);
+}
