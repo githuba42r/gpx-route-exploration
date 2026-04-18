@@ -1,5 +1,6 @@
 """Tests for POST /api/routes/<id>/generate."""
 
+import json
 import os
 from unittest.mock import patch
 
@@ -192,3 +193,77 @@ def test_generate_stop_waypoint_stop_yields_two_legs(client):
     assert body["legs_count"] == 2
     from_to = [(l["from_position"], l["to_position"]) for l in body["legs"]]
     assert from_to == [(0, 1), (1, 2)]
+
+
+def test_generate_uses_resolved_costing_options(client, app, monkeypatch):
+    """preset=gravel-mtb flows through to the Valhalla request."""
+    rid = client.post("/api/routes", json={"title": "Gravel"},
+                      content_type="application/json").get_json()["id"]
+    for name, lat, lon in [("A", -27.4, 152.9), ("B", -27.5, 152.8), ("C", -27.6, 152.7)]:
+        client.post(f"/api/routes/{rid}/waypoints",
+                    json={"kind": "stop", "name": name, "lat": lat, "lon": lon})
+    client.patch(f"/api/routes/{rid}/options",
+                 json={"costing_preset": "gravel-mtb"})
+
+    captured = {}
+    fake = _fake_valhalla_response()
+
+    def fake_call_route(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("server.blueprints.api_routing.vc.call_route", fake_call_route)
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+
+    co = captured["costing_options"]
+    assert co.get("bicycle_type") == "Mountain"
+    assert co.get("use_roads", 1.0) < 0.5
+
+
+def test_generate_custom_preset_uses_stored_costing_options(client, app, monkeypatch):
+    """preset=custom uses the persisted costing_options verbatim."""
+    rid = client.post("/api/routes", json={"title": "Custom"},
+                      content_type="application/json").get_json()["id"]
+    for name, lat, lon in [("A", -27.4, 152.9), ("B", -27.5, 152.8), ("C", -27.6, 152.7)]:
+        client.post(f"/api/routes/{rid}/waypoints",
+                    json={"kind": "stop", "name": name, "lat": lat, "lon": lon})
+    client.patch(f"/api/routes/{rid}/options", json={
+        "costing_preset": "custom",
+        "costing_options": {"use_hills": 0.95, "bicycle_type": "Mountain"},
+    })
+
+    captured = {}
+    fake = _fake_valhalla_response()
+
+    def fake_call_route(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("server.blueprints.api_routing.vc.call_route", fake_call_route)
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200
+    assert captured["costing_options"] == {"use_hills": 0.95, "bicycle_type": "Mountain"}
+
+
+def test_generate_round_trip_flag_reaches_valhalla(client, app, monkeypatch):
+    """round_trip=True is forwarded to the Valhalla client."""
+    rid = client.post("/api/routes", json={"title": "Loop"},
+                      content_type="application/json").get_json()["id"]
+    for name, lat, lon in [("A", -27.4, 152.9), ("B", -27.5, 152.8)]:
+        client.post(f"/api/routes/{rid}/waypoints",
+                    json={"kind": "stop", "name": name, "lat": lat, "lon": lon})
+    client.patch(f"/api/routes/{rid}/options", json={"round_trip": True})
+
+    # Round-trip with 2 waypoints expects 2 legs — use the 2-leg fake.
+    captured = {}
+    fake = _fake_valhalla_response()
+
+    def fake_call_route(**kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("server.blueprints.api_routing.vc.call_route", fake_call_route)
+    resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200
+    assert captured["round_trip"] is True

@@ -11,6 +11,7 @@ from server.models import get_db
 from server.models import waypoints as wp_model
 from server.models.routes import get_route
 from server.models.categories import get_category
+from server.routing import presets
 from server.routing import valhalla_client as vc
 from server.routing.gpx_writer import write_track_gpx
 
@@ -44,13 +45,29 @@ def generate_route(route_id):
         return jsonify({"error": f"waypoints without coordinates: {missing}"}), 400
 
     opts = wp_model.get_or_create_options(route_id)
-    profile = opts["profile"]
+    # Preset resolution: the stored preset name yields a profile +
+    # costing-options dict. Persisted overrides (set via the custom
+    # panel, or directly by the API) merge on top — explicit user edits
+    # win over preset defaults. 'custom' resolves to an empty preset so
+    # only the persisted options apply.
+    preset_name = opts.get("costing_preset") or "road"
+    resolved = presets.resolve(preset_name)
+    profile = opts.get("profile") or resolved["profile"]
+    costing_options = dict(resolved["costing_options"])
+    persisted = opts.get("costing_options")
+    if persisted:
+        try:
+            override = _json.loads(persisted)
+            if isinstance(override, dict):
+                costing_options.update(override)
+        except (TypeError, ValueError):
+            pass  # corrupted JSON — ignore and use preset defaults.
 
     try:
         response = vc.call_route(
             waypoints=[(w["lat"], w["lon"]) for w in wps],
             profile=profile,
-            costing_options={},  # M3 wires the full costing options
+            costing_options=costing_options,
             round_trip=bool(opts.get("round_trip")),
             kinds=[w.get("kind") or "stop" for w in wps],
         )
