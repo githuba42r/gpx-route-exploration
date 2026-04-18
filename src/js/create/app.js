@@ -682,6 +682,13 @@ async function doGenerate(state) {
     state.generatedVersion = version;
     if (version === state.currentVersion) {
       drawGeneratedRoute(state, body.legs || []);
+      // Editor re-paint so gradient-warning badges (M3c) land on the
+      // receiving rows. drawGeneratedRoute already stashed state.legs.
+      if (state.editor) {
+        state.editor.setWaypoints(
+          annotateWaypointsWithLegWarnings(state.waypoints, state.legs),
+        );
+      }
     } else {
       // Waypoints were changed while the generate was in flight — drop this
       // stale result and let the debounce timer kick another round.
