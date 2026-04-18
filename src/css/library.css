@@ -102,10 +102,15 @@
 /* Tag cloud active state */
 .tag-chip.active { background: #e94560; color: #fff; }
 
-/* New Route button */
+/* New Route button — sits at the top of the sidebar. */
+#sidebar-new-route { display: flex; }
 .new-route-btn {
   background:#e94560; color:#fff; border:none;
-  padding:6px 12px; border-radius:4px; cursor:pointer; font-size:0.85em;
-  margin-left:8px;
+  padding:8px 12px; border-radius:4px; cursor:pointer; font-size:0.9em;
+  width:100%; font-weight:600;
 }
 .new-route-btn:hover { background:#c93651; }
+
+/* Upload area pinned to the sidebar bottom — make the drop zone compact. */
+#sidebar #upload-area .upload-zone { padding: 14px 10px; font-size: 0.8em; }
+#sidebar #upload-area .upload-form { padding: 10px; }

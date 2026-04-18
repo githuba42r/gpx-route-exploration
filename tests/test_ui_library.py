@@ -75,3 +75,45 @@ def test_new_route_button_navigates_to_create(page, server_url):
     page.wait_for_url(lambda url: url.rstrip('/').endswith('/create') or '/create?' in url,
                        timeout=5000)
     assert '/create' in page.url
+
+
+def test_new_route_button_lives_in_sidebar_above_categories(page, server_url):
+    """+ New Route now sits in the sidebar above the category panel —
+    not inside the main route list column."""
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(server_url)
+    sidebar_btn = page.locator("#sidebar button.new-route-btn")
+    expect(sidebar_btn).to_be_visible()
+    # Make sure it's NOT inside #route-list anymore.
+    assert page.locator("#route-list button.new-route-btn").count() == 0
+
+    # The sidebar slot must come before #category-panel in DOM order.
+    ok = page.evaluate(
+        """() => {
+            const btn = document.querySelector('#sidebar-new-route');
+            const cats = document.querySelector('#category-panel');
+            if (!btn || !cats) return false;
+            return btn.compareDocumentPosition(cats) & Node.DOCUMENT_POSITION_FOLLOWING;
+        }"""
+    )
+    assert ok, "New Route button must appear above the Category panel in the sidebar"
+
+
+def test_upload_area_is_anchored_at_sidebar_bottom(page, server_url):
+    """The GPX drop zone moved from the top of the route list to the
+    bottom of the sidebar."""
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(server_url)
+    expect(page.locator("#sidebar #upload-area")).to_be_visible()
+    # It is no longer inside #route-list.
+    assert page.locator("#route-list #upload-area").count() == 0
+
+    # And it's the last child of #sidebar (the flex spacer is above it).
+    is_last = page.evaluate(
+        """() => {
+            const side = document.querySelector('#sidebar');
+            return side && side.lastElementChild
+                && side.lastElementChild.id === 'upload-area';
+        }"""
+    )
+    assert is_last, "Upload area must be the last child in the sidebar"

@@ -809,8 +809,20 @@ async function main() {
   };
 
   loadPrefs(state);
+
+  // Capture the URL state *before* ensureRouteId rewrites it. The
+  // Analysis nav button is meant for "I'm editing an existing route" —
+  // freshly-created routes (where we assign the id here) shouldn't show
+  // it yet, since the user hasn't generated a GPX to analyse.
+  const arrivedWithRouteId = new URL(window.location.href)
+    .searchParams.has('route_id');
+
   state.routeId = await ensureRouteId();
   state.map = initCreateMap('map');
+
+  // Playwright + debug hook: expose state so tests can assert on or
+  // nudge it without reimplementing the whole edit/generate cycle.
+  window.__appState = state;
 
   const editor = mountWaypointEditor(
     document.getElementById('editor-panel'),
@@ -920,6 +932,68 @@ async function main() {
     btn.textContent = 'Saved ✓';
     setTimeout(() => { btn.textContent = orig; }, 1200);
   });
+
+  // --- Analysis button: visible only when editing an existing route. ---
+  // `arrivedWithRouteId` was captured before ensureRouteId ran, so this
+  // distinguishes "user opened /create?route_id=<id>" (show) from "user
+  // opened /create and we just assigned an id" (hide, nothing to analyse).
+  const analysisBtn = document.getElementById('btn-open-analysis');
+  if (arrivedWithRouteId && analysisBtn) {
+    analysisBtn.href = `/route/${state.routeId}`;
+    analysisBtn.style.display = '';
+  }
+
+  // --- Dirty-state prompt on navigation ---
+  //
+  // Auto-save keeps the recipe in sync with the server, but a "dirty"
+  // state still exists between the last generate and subsequent edits:
+  // the GPX Valhalla produced is stale until a fresh Regenerate runs.
+  // Navigating to Library / Analysis in that window would show the user
+  // a route that no longer matches their intent — so we prompt.
+
+  function isDirty() {
+    // No recipe-edit since last generate → clean.
+    if (state.generatedVersion < 0) return false;
+    return state.generatedVersion !== state.currentVersion;
+  }
+
+  async function guardNav(href, e) {
+    if (!isDirty()) return true;  // let the link navigate normally
+    e.preventDefault();
+    const save = window.confirm(
+      "You have edited this route but haven't regenerated the GPX yet.\n\n" +
+      "OK — regenerate now, then leave.\n" +
+      "Cancel — leave without regenerating (the destination will show the previously-generated route).",
+    );
+    if (save) {
+      setStatus('Regenerating before leaving…', 'busy');
+      try {
+        await api.generateRoute(state.routeId);
+      } catch (err) {
+        const leave = window.confirm('Regenerate failed: ' + err.message + '\n\nLeave anyway?');
+        if (!leave) return false;
+      }
+    }
+    window.location.href = href;
+    return false;
+  }
+
+  document.querySelectorAll('a[href="/"], a#btn-open-analysis').forEach(link => {
+    link.addEventListener('click', (e) => guardNav(link.href, e));
+  });
+
+  // Catch-all: browser close / reload / external link. Shows the native
+  // browser "Leave site?" dialog — no custom UI, but protects from data loss.
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty()) {
+      e.preventDefault();
+      e.returnValue = '';   // Chrome requires a truthy returnValue.
+    }
+  });
+
+  // Set AFTER every listener has been wired so Playwright can deterministically
+  // wait for the page to be fully interactive.
+  window.__appReady = true;
 }
 
 main().catch(err => {

@@ -15,7 +15,6 @@ import { createStartEndMarkers, createGradientMarkers, createPosMarker } from '.
 import { createHighlight } from './map-highlight.js';
 import { initMapHoverPanel } from './map-hover.js';
 import { initProfile } from './profile.js';
-import { initEditPanel } from './edit-panel.js';
 import { initContextMenu } from './context-menu.js';
 import { initSettings } from './settings.js';
 import { initNav } from './nav.js';
@@ -172,19 +171,8 @@ async function main() {
 
   // Nav (no-op for now)
   initNav();
-
-  // --- M2 Edit panel ---
-  // Only wire up if this route has a recipe (route_waypoints rows exist).
-  // Recipe-less routes (legacy GPX uploads) have the Edit button disabled
-  // server-side via the template.
-  if (document.body.dataset.hasRecipe === 'true') {
-    const routeId = Number(document.body.dataset.routeId);
-    const panelApi = initEditPanel({ map, routeId });
-    const editBtn = document.getElementById('btn-open-edit');
-    if (editBtn && !editBtn.disabled) {
-      editBtn.addEventListener('click', panelApi.open);
-    }
-  }
+  // Edit Route in the nav is now a plain anchor navigating to /create?route_id=<id>
+  // (the Create page serves as the editor). No JS needed here.
 }
 
 main().catch(err => {

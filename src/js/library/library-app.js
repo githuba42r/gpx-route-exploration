@@ -134,15 +134,15 @@ async function refresh() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // --- New Route button: navigates to the Create page ---
+  // --- New Route button lives in the sidebar, above Categories ---
   const newRouteBtn = document.createElement('button');
   newRouteBtn.className = 'new-route-btn';
   newRouteBtn.textContent = '+ New Route';
   newRouteBtn.addEventListener('click', () => {
     window.location.href = '/create';
   });
-  const headerEl = $('#route-list');
-  if (headerEl) headerEl.prepend(newRouteBtn);
+  const slot = $('#sidebar-new-route');
+  if (slot) slot.appendChild(newRouteBtn);
 
   try {
     await loadData();
