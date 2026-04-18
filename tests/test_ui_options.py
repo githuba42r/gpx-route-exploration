@@ -53,7 +53,9 @@ def test_round_trip_toggle_patches_options(page, server_url):
     assert any("round_trip" in p and "true" in p for p in patches), patches
 
 
-def test_pin_start_via_sidebar_checkbox(page, server_url):
+def test_pin_start_via_sidebar_context_menu(page, server_url):
+    """Right-clicking a sidebar row opens the pin context menu and
+    'Set as Start' flips the row's pin_role."""
     _goto_create(page, server_url)
     _click_map_at(page, "#map", 0.3, 0.4)
     _click_map_at(page, "#map", 0.6, 0.4)
@@ -61,12 +63,14 @@ def test_pin_start_via_sidebar_checkbox(page, server_url):
         "() => document.querySelectorAll('.wpe-item').length === 2", timeout=3000,
     )
     first = page.locator(".wpe-item").first
-    first.hover()
-    first.locator(".wpe-pin-start").check()
+    first.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    page.locator('#pin-ctx-menu button[data-act="set-start"]').click()
     expect(first.locator(".wpe-badge")).to_have_text("Start", timeout=3000)
 
 
-def test_sidebar_exclude_dims_row(page, server_url):
+def test_sidebar_context_menu_exclude_dims_row(page, server_url):
+    """Right-click a row → Exclude → row gets wpe-excluded class."""
     _goto_create(page, server_url)
     _click_map_at(page, "#map", 0.3, 0.4)
     _click_map_at(page, "#map", 0.6, 0.4)
@@ -74,9 +78,29 @@ def test_sidebar_exclude_dims_row(page, server_url):
         "() => document.querySelectorAll('.wpe-item').length === 2", timeout=3000,
     )
     row = page.locator(".wpe-item").first
-    row.hover()
-    row.locator(".wpe-include-toggle").click()
+    row.click(button="right")
+    expect(page.locator("#pin-ctx-menu")).to_be_visible(timeout=1500)
+    page.locator('#pin-ctx-menu button[data-act="toggle-include"]').click()
     expect(row).to_have_class(re.compile(r".*wpe-excluded.*"), timeout=3000)
+
+
+def test_set_start_mutual_exclusion(page, server_url):
+    """Setting Start on a second row clears it from the first."""
+    _goto_create(page, server_url)
+    _click_map_at(page, "#map", 0.3, 0.4)
+    _click_map_at(page, "#map", 0.6, 0.4)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 2", timeout=3000,
+    )
+    rows = page.locator(".wpe-item")
+    rows.nth(0).click(button="right")
+    page.locator('#pin-ctx-menu button[data-act="set-start"]').click()
+    expect(rows.nth(0).locator(".wpe-badge")).to_have_text("Start", timeout=3000)
+    rows.nth(1).click(button="right")
+    page.locator('#pin-ctx-menu button[data-act="set-start"]').click()
+    expect(rows.nth(1).locator(".wpe-badge")).to_have_text("Start", timeout=3000)
+    # First row no longer carries the Start badge.
+    expect(rows.nth(0).locator(".wpe-badge")).to_have_count(0)
 
 
 def test_custom_panel_opens_on_preset_custom(page, server_url):

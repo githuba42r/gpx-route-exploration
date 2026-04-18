@@ -120,31 +120,17 @@
 .stop-edit-actions button.primary { background:#e94560; border-color:#e94560; }
 .stop-edit-actions button:hover { filter:brightness(1.1); }
 
-/* -------------------- M3a pin controls & include toggle -------------------- */
+/* -------------------- M3a right-click menu affordance -------------------- */
 
-.wpe-pin-controls {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-  opacity: 0.5;
-  transition: opacity 150ms;
-  font-size: 0.8em;
-}
-.wpe-item:hover .wpe-pin-controls,
-.wpe-item .wpe-pin-controls:has(input:checked) {
-  opacity: 1;
-}
-.wpe-pin-controls label {
-  cursor: pointer;
-}
-.wpe-include-toggle {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: 1em;
-  color: inherit;
-}
+/* The row itself stays simple — all mutations (Set Start, Set End,
+ * Include, Exclude, Delete) go through the shared #pin-ctx-menu
+ * opened on right-click (see openPinContextMenu in create/app.js).
+ * The visual hint that a row has a menu is a subtle cursor change. */
+.wpe-item { cursor: context-menu; }
+
+/* Dim + strikethrough excluded rows regardless of the base item rule
+ * (the base rule also has this at 0.45 — re-stated here for clarity
+ * and so `wpe-excluded` remains self-contained for the right-click menu). */
 .wpe-excluded {
   opacity: 0.45;
   text-decoration: line-through wavy #c77;

@@ -255,9 +255,14 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
   const menu = document.getElementById('pin-ctx-menu');
   const isStop = w.kind === 'stop';
   const included = w.included !== 0;
+  const isStart = w.pin_role === 'start';
+  const isEnd = w.pin_role === 'end';
 
   menu.innerHTML = `
     <div class="ctx-header">${escapeHtml(w.name || (isStop ? 'Stop' : 'Waypoint'))}</div>
+    <button data-act="set-start" type="button">${isStart ? 'Unset as Start' : 'Set as Start'}</button>
+    <button data-act="set-end" type="button">${isEnd ? 'Unset as End' : 'Set as End'}</button>
+    <div class="ctx-sep"></div>
     <button data-act="toggle-kind" type="button">${isStop ? 'Mark as Waypoint' : 'Mark as Stop'}</button>
     <button data-act="toggle-include" type="button">${included ? 'Exclude from route' : 'Include in route'}</button>
     ${isStop ? '<button data-act="edit-stop" type="button">Edit stop details…</button>' : ''}
@@ -265,9 +270,11 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
     <button data-act="delete" type="button" class="danger">Delete</button>
   `;
 
-  // Position at the cursor.
-  const ev = leafletEvt?.originalEvent;
-  if (ev) {
+  // Position at the cursor. Leaflet events wrap the DOM event in
+  // `.originalEvent`; a native contextmenu event IS the DOM event
+  // itself — support both.
+  const ev = leafletEvt?.originalEvent ?? leafletEvt;
+  if (ev && ev.clientX != null) {
     menu.style.left = ev.clientX + 'px';
     menu.style.top = ev.clientY + 'px';
   }
@@ -298,6 +305,25 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
         await onWaypointsChanged(state, editor);
       } else if (act === 'toggle-include') {
         await api.patchWaypoint(state.routeId, w.id, { included: included ? 0 : 1 });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'set-start') {
+        // Mutual exclusion — if another row already has role=start,
+        // clear it first so the server never sees two rows with the
+        // same pin_role.
+        const nextRole = isStart ? null : 'start';
+        if (nextRole) {
+          const current = state.waypoints.find(x => x.pin_role === 'start' && x.id !== w.id);
+          if (current) await api.patchWaypoint(state.routeId, current.id, { pin_role: null });
+        }
+        await api.patchWaypoint(state.routeId, w.id, { pin_role: nextRole });
+        await onWaypointsChanged(state, editor);
+      } else if (act === 'set-end') {
+        const nextRole = isEnd ? null : 'end';
+        if (nextRole) {
+          const current = state.waypoints.find(x => x.pin_role === 'end' && x.id !== w.id);
+          if (current) await api.patchWaypoint(state.routeId, current.id, { pin_role: null });
+        }
+        await api.patchWaypoint(state.routeId, w.id, { pin_role: nextRole });
         await onWaypointsChanged(state, editor);
       } else if (act === 'edit-stop') {
         openStopEditModal(state, editor, w);
@@ -989,19 +1015,11 @@ async function main() {
         await api.deleteWaypoint(state.routeId, wptId);
         await onWaypointsChanged(state, editor);
       },
-      onUpdate: async (wptId, patch) => {
-        // pin_role is mutually-exclusive across the whole route — if the
-        // user pinned a new start/end, clear the previous one first so
-        // the server never sees two rows with the same role.
-        if (patch.pin_role === 'start' || patch.pin_role === 'end') {
-          const role = patch.pin_role;
-          const current = state.waypoints.find(w => w.pin_role === role && w.id !== wptId);
-          if (current) {
-            await api.patchWaypoint(state.routeId, current.id, { pin_role: null });
-          }
-        }
-        await api.patchWaypoint(state.routeId, wptId, patch);
-        await onWaypointsChanged(state, editor);
+      // Right-click on a sidebar row → open the same context menu the
+      // map-marker right-click uses. Keeps behaviour identical whether
+      // the user's hand is on the map or on the list.
+      onContextMenu: (w, evt) => {
+        openPinContextMenu(state, editor, w, evt);
       },
       // Collapse the whole sidebar, not just the widget inside — otherwise
       // the aside stays at 340 px and the map keeps a dark dead strip on
