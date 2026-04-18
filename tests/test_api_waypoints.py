@@ -176,3 +176,52 @@ def test_patch_waypoint_can_toggle_link(client, app):
     resp = client.patch(f"/api/routes/{rid}/waypoints/{w['id']}",
                         json={"linked_to_previous": True})
     assert resp.get_json()["linked_to_previous"] == 1
+
+
+def test_patching_linked_to_previous_clears_last_optimised_at(client, app):
+    from server.models import waypoints as wp_model
+    rid = client.post("/api/routes", json={"title": "I"},
+                      content_type="application/json").get_json()["id"]
+    w = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+    }).get_json()
+    with app.app_context():
+        wp_model.update_options(rid, last_optimised_at=1234567890)
+    client.patch(f"/api/routes/{rid}/waypoints/{w['id']}",
+                 json={"linked_to_previous": 0})
+    with app.app_context():
+        opts = wp_model.get_or_create_options(rid)
+    assert opts["last_optimised_at"] is None
+
+
+def test_patching_other_fields_does_not_clear_last_optimised_at(client, app):
+    """Only linked_to_previous invalidates the optimiser cache."""
+    from server.models import waypoints as wp_model
+    rid = client.post("/api/routes", json={"title": "I"},
+                      content_type="application/json").get_json()["id"]
+    w = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+    }).get_json()
+    with app.app_context():
+        wp_model.update_options(rid, last_optimised_at=1234567890)
+    client.patch(f"/api/routes/{rid}/waypoints/{w['id']}", json={"name": "W2"})
+    with app.app_context():
+        opts = wp_model.get_or_create_options(rid)
+    assert opts["last_optimised_at"] == 1234567890
+
+
+def test_patching_linked_to_previous_no_change_preserves_timestamp(client, app):
+    """Sending linked_to_previous=1 when it's already 1 does NOT clear."""
+    from server.models import waypoints as wp_model
+    rid = client.post("/api/routes", json={"title": "I"},
+                      content_type="application/json").get_json()["id"]
+    w = client.post(f"/api/routes/{rid}/waypoints", json={
+        "name": "W", "lat": 0, "lon": 0, "kind": "waypoint",
+    }).get_json()
+    with app.app_context():
+        wp_model.update_options(rid, last_optimised_at=1234567890)
+    client.patch(f"/api/routes/{rid}/waypoints/{w['id']}",
+                 json={"linked_to_previous": 1})
+    with app.app_context():
+        opts = wp_model.get_or_create_options(rid)
+    assert opts["last_optimised_at"] == 1234567890

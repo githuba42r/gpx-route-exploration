@@ -77,6 +77,18 @@ def patch_waypoint(route_id, wpt_id):
     if "linked_to_previous" in data:
         data["linked_to_previous"] = 1 if data["linked_to_previous"] else 0
     updated = wp_model.update_waypoint(wpt_id, route_id, **data)
+    # D5: any change to linked_to_previous invalidates the optimiser's
+    # cached result (groupings shifted). Direct SQL because update_options
+    # filters None values out.
+    if "linked_to_previous" in data and \
+            int(data["linked_to_previous"]) != int(existing.get("linked_to_previous", 1)):
+        from server.models import get_db
+        db = get_db()
+        db.execute(
+            "UPDATE route_options SET last_optimised_at = NULL WHERE route_id = ?",
+            (route_id,),
+        )
+        db.commit()
     return jsonify(updated), 200
 
 
