@@ -28,15 +28,21 @@ export function listWaypoints(routeId) {
   return json('GET', `/api/routes/${routeId}/waypoints`);
 }
 
-export function appendWaypoint(routeId, { name, lat, lon, kind, address, description }) {
+export function appendWaypoint(
+  routeId,
+  { name, lat, lon, kind, address, description, linked_to_previous },
+) {
   return json('POST', `/api/routes/${routeId}/waypoints`,
-              { name, lat, lon, kind, address, description });
+              { name, lat, lon, kind, address, description, linked_to_previous });
 }
 
-export function insertWaypointAt(routeId, position,
-                                 { name, lat, lon, kind, address, description }) {
+export function insertWaypointAt(
+  routeId, position,
+  { name, lat, lon, kind, address, description, linked_to_previous },
+) {
   return json('POST', `/api/routes/${routeId}/waypoints`,
-              { name, lat, lon, kind, address, description, position });
+              { name, lat, lon, kind, address, description,
+                linked_to_previous, position });
 }
 
 export function patchWaypoint(routeId, wptId, patch) {

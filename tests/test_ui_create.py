@@ -410,13 +410,17 @@ def test_drag_reorder_waypoints(page, server_url):
         "() => document.querySelectorAll('.wpe-item').length === 3",
         timeout=5000,
     )
+    # Row text carries auxiliary badges (pin_role, link-chain for linked
+    # waypoints) — strip those and compare just the leading name prefix.
     names_before = page.locator(".wpe-item .wpe-name").all_text_contents()
-    assert [n.strip() for n in names_before] == ["Waypoint 1", "Waypoint 2", "Waypoint 3"]
+    leading = [n.strip().split(" ", 2)[:2] for n in names_before]
+    assert leading == [["Waypoint", "1"], ["Waypoint", "2"], ["Waypoint", "3"]]
     src = page.locator(".wpe-item").nth(2).locator(".wpe-handle")
     dst = page.locator(".wpe-item").nth(0).locator(".wpe-handle")
     src.drag_to(dst)
     page.wait_for_function(
-        "() => document.querySelectorAll('.wpe-item .wpe-name')[0].textContent.trim() === 'Waypoint 3'",
+        "() => document.querySelectorAll('.wpe-item .wpe-name')[0]"
+        ".textContent.trim().startsWith('Waypoint 3')",
         timeout=3000,
     )
 
