@@ -274,15 +274,19 @@ Central milestone. Expands the bare profile picker into the full elevation- and 
 - **`generate` endpoint wiring.** `POST /api/routes/<id>/generate` now reads `route_options.profile` + `costing_options` and injects them into the Valhalla `/route` request body at `costing` + `costing_options.<profile>`. Also passes `elevation_interval: 10` so returned trkpts carry elevation.
 - **Gradient-warning post-processor** (`server/route_postprocess.py`): after every `/generate` call, scan the returned legs' elevation samples using the same smoothing+window logic as the analysis page, flag any sub-segment whose smoothed gradient exceeds `max_gradient_warn`. Warnings are persisted alongside `route_legs` (new column `warnings TEXT` — JSON array of `{from_m, to_m, peak_grad_pct}`) and surfaced in the sidebar (⚠️ badge on the affected leg row) + highlighted on the map in the steepest-band colour.
 - **"Optimise" button** runs nearest-neighbour initialisation + 2-opt local search on included waypoints, respecting pins. Cost function uses *route-network distance* from cached `route_legs` when available, falling back to haversine. New API: `POST /api/routes/<id>/optimise` returns `{ new_order: [waypoint_id, ...] }`.
-- Changing `profile`, `costing_preset`, or any `costing_options` value invalidates `route_legs` and marks the route as "needs regeneration" (disabled analysis until user hits Regenerate).
+- **Linked-to-previous waypoints.** New column `route_waypoints.linked_to_previous` (BOOLEAN NOT NULL DEFAULT 1 for `kind="waypoint"`, DEFAULT 0 for `kind="stop"`), added via the idempotent runtime migration pattern introduced in M1. A linked waypoint rides with the preceding stop as a single unit through the optimiser, preserving shape constraints (e.g. "go via this pass" stays attached to the leg it was dropped on). The right-click context menu on a waypoint gains two mutually-exclusive entries: **Unlink from previous** (when `linked_to_previous=1`) and **Re-link to previous** (when `0`); choosing Unlink promotes the waypoint to a free-floating node that the optimiser can reorder. Stops cannot be linked — the menu entry is hidden for stops. Line-drag-inserted waypoints default to `linked_to_previous=1`, matching the "I want the route to go through here" intent.
+- **Optimiser honours linked groups.** The cost matrix is built over *groups* — each group is a stop plus any trailing linked waypoints up to (but not including) the next stop. 2-opt swaps whole groups, never reaching inside one. Output preserves intra-group order; `new_order` is a flattened list of waypoint ids. Right-click menu toggling `linked_to_previous` invalidates any cached optimiser result.
+- Changing `profile`, `costing_preset`, or any `costing_options` value invalidates `route_legs` and marks the route as "needs regeneration" (disabled analysis until user hits Regenerate). Toggling `linked_to_previous` does NOT invalidate legs (geometry is unchanged) but DOES invalidate any cached optimiser result.
 
 **Acceptance:**
 - Switch preset from Road cyclist → Gravel-MTB on a route with an unpaved cut-through → Regenerate → the new track uses the unpaved cut-through (compare returned polyline to the road-preferring version).
 - Route with a forced-steep segment and `max_gradient_warn=10` → sidebar shows a ⚠️ badge on the offending leg; map highlights the over-threshold sub-segment; clearing `max_gradient_warn` removes the badge without re-hitting Valhalla.
 - Exclude a waypoint via the list toggle, Regenerate → route skips it. Right-click the excluded marker → re-include via context menu.
 - Pin first stop, click Optimise → order changes but pinned stop stays at index 0.
-- Unit: `test_optimiser.py` with synthetic point sets (include a 2-opt-reducible case); `test_route_postprocess.py` covers the gradient-warning logic with synthetic elevation samples; `test_costing_presets.py` verifies preset → costing-options mapping.
-- UI: `test_ui_options.py` — preset switching, custom panel, profile switch invalidates legs, optimise reorders, pin honoured, include toggle works from list and from context menu, gradient warning badge renders when threshold is crossed.
+- Route with Stop A → Waypoint W (linked) → Stop B → Stop C, where the optimiser would otherwise move B before A: the result keeps W riding with A (A, W still adjacent in the new order) because W is linked.
+- Right-click a linked waypoint → Unlink from previous → Optimise again → W is now free to move independently of A.
+- Unit: `test_optimiser.py` with synthetic point sets (include a 2-opt-reducible case, AND a case with linked waypoints that verifies groups stay intact); `test_route_postprocess.py` covers the gradient-warning logic with synthetic elevation samples; `test_costing_presets.py` verifies preset → costing-options mapping.
+- UI: `test_ui_options.py` — preset switching, custom panel, profile switch invalidates legs, optimise reorders, pin honoured, include toggle works from list and from context menu, gradient warning badge renders when threshold is crossed, linked-waypoint context-menu toggles update the sidebar badge + persist to the recipe.
 
 ### M4 — Rich GPX export / import
 
@@ -355,6 +359,90 @@ All pages made usable on phone-sized viewports (≥ 360 px wide). Not a separate
 - Playwright runs the existing test suites against an iPhone 13 viewport (`page.set_viewport_size({width: 390, height: 844})` + `page.emulate_media(...)`), and a dedicated `test_ui_mobile.py` covers: tap-to-add on Create page, swipeable sheet on Edit panel, long-press context menu, profile drag-zoom on touch, library card stacking.
 - Visual regression: screenshots of library, analysis, and create pages at 390 × 844 committed under `tests/fixtures/mobile-screenshots/`; CI fails on pixel diff beyond threshold.
 - Manual verification checklist: one pass on a real phone (iOS Safari or Android Chrome) confirming drag, pinch, long-press, and sheet gestures feel natural.
+
+### M8 — Bookmarks
+
+A per-user library of reusable locations (favourite trailheads, cafés, viewpoints, campsites) that can be dropped into any of the user's routes. Bookmarks are created three ways — promoted from an existing route waypoint, captured from an arbitrary point on the map, or authored directly from metadata — and then reused across routes via a picker on the Create page. They inherit the existing tag system so the user's tag cloud works uniformly across routes, categories, and bookmarks.
+
+**Ships:**
+- **SQL (additive, `CREATE TABLE IF NOT EXISTS` at startup — same migration discipline as M1):**
+    ```sql
+    CREATE TABLE bookmarks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid        TEXT    NOT NULL UNIQUE,            -- used as the on-disk photo folder name, decouples from autoincrement
+        user_id     TEXT    NOT NULL DEFAULT 'anonymous',
+        name        TEXT    NOT NULL,
+        description TEXT    DEFAULT '',
+        lat         REAL    NOT NULL,
+        lon         REAL    NOT NULL,
+        created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX idx_bookmarks_user ON bookmarks(user_id);
+
+    CREATE TABLE bookmark_tags (
+        bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+        tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (bookmark_id, tag_id)
+    );
+
+    CREATE TABLE bookmark_photos (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        bookmark_id   INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+        position      INTEGER NOT NULL,                 -- 0-indexed display order
+        storage_name  TEXT    NOT NULL,                 -- file name within the bookmark's photo folder (e.g. "a1b2.jpg")
+        mime_type     TEXT    NOT NULL,                 -- image/jpeg, image/png, image/webp
+        byte_size     INTEGER NOT NULL,
+        caption       TEXT    DEFAULT '',
+        created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(bookmark_id, position)
+    );
+    CREATE INDEX idx_bookmark_photos_bookmark ON bookmark_photos(bookmark_id);
+    ```
+    Photos are zero-or-more — a bookmark with no `bookmark_photos` rows is fully valid. `bookmark_tags` mirrors the existing `route_tags` / `category_tags` idiom (see `server/models/schema.sql` and `server/models/tags.py`); the tag cloud endpoint `get_tags_with_counts` is extended with a third `SELECT COUNT` union so bookmark-only tags appear alongside route/category tags.
+- **Disk layout for photos:** `{DATA_DIR}/bookmarks/<user_id>/<bookmark_uuid>/<storage_name>` — analogous to the existing `{DATA_DIR}/gpx/<user_id>/<category_slug>/<storage_name>.gpx` layout in `server/blueprints/api_routes.py` (l. 59–65). Using the bookmark's `uuid` (not `id`) in the path means deleting + recreating a bookmark with the same id can't alias a stale photo directory, and avoids leaking sequential ids into URLs served to the browser.
+- **New model + blueprint:**
+    - `server/models/bookmarks.py` — CRUD, photo ordering, tag-integration helpers (mirrors `server/models/routes.py` shape, user-scoped on every query).
+    - `server/blueprints/api_bookmarks.py` (new, url_prefix `/api`), using the same `get_current_user()` + `_require_bookmark` guard pattern as `api_waypoints.py`:
+        - `GET    /api/bookmarks`                              — list current user's bookmarks, with tag list, photo count, and first-photo thumbnail URL.
+        - `POST   /api/bookmarks`                              — create from JSON `{name, description, lat, lon, tags?}`.
+        - `GET    /api/bookmarks/<id>`                         — full detail incl. photos list.
+        - `PATCH  /api/bookmarks/<id>`                         — update name, description, lat, lon.
+        - `DELETE /api/bookmarks/<id>`                         — cascades to photos (DB rows + on-disk folder).
+        - `PUT    /api/bookmarks/<id>/tags`                    — replace tag list (mirrors `/api/routes/<id>/tags` in `api_tags.py`).
+        - `POST   /api/bookmarks/<id>/photos`                  — multipart upload; server writes the file, generates a 320 px thumbnail (stored as `<storage_name>.thumb.jpg`), inserts a `bookmark_photos` row at the tail position.
+        - `DELETE /api/bookmarks/<id>/photos/<photo_id>`       — deletes the row + both files on disk.
+        - `PUT    /api/bookmarks/<id>/photos/order`            — JSON `{order: [photo_id, ...]}` full-reorder.
+        - `GET    /api/bookmarks/<id>/photos/<photo_id>`       — serves the image (streamed with correct `Content-Type`); `?thumb=1` serves the thumbnail.
+        - `POST   /api/bookmarks/from-waypoint/<wpt_id>`       — shortcut: copies a route waypoint's `name`, `lat`, `lon`, `description` into a new bookmark. Re-uses `_require_route` ownership check via the waypoint's parent route id.
+        - `POST   /api/routes/<id>/waypoints/from-bookmark`    — body `{bookmark_id, position?, kind?}`; inserts a new `route_waypoints` row copying the bookmark's fields. Kind defaults to `stop`. Position semantics match `api_waypoints.py::append_waypoint` (absent → append; integer → insert-at-position, so it composes with M2 Task 6's line-drag insertion).
+- **Photo handling:**
+    - Accepted MIME types: `image/jpeg`, `image/png`, `image/webp`. Rejected otherwise with HTTP 415.
+    - Per-photo size cap: 10 MB, configurable via `BOOKMARK_PHOTO_MAX_BYTES` env var. Server rejects oversize uploads before reading to disk.
+    - Server-side thumbnailing requires **Pillow** — a new Python dependency to add to `requirements.txt` alongside `flask`, `lxml`, etc. Thumbnails are 320 px on the longest edge, JPEG q=82, used on bookmark cards and picker entries. Fall back to the full image if Pillow import fails (logged once, feature still functional).
+    - Frontend lazy-loads thumbnails via `loading="lazy"` on `<img>`; full-size image is fetched only when the user clicks into the bookmark editor.
+- **Frontend — Library page** (`src/js/library/`): add a second top-level tab alongside the existing routes cards — "Routes | Bookmarks". Chose a tab (not a sidebar panel) because the existing sidebar is already occupied by the tag cloud + category panel, and because bookmarks have their own cards + filters and need the full content column. The Bookmarks tab renders cards showing the first photo (or a placeholder glyph if none), name, tag chips, and coordinates; clicking a card opens a metadata editor modal (name, description, tags, photo gallery with drag-to-reorder, per-photo delete). A toolbar above the cards exposes **"+ New bookmark"** (opens a modal with a Leaflet map — user pans/clicks to set coords, fills name + tags, saves) and a search + tag-filter strip reusing the existing tag-cloud click-to-filter behaviour. Drag-to-reorder of the cards themselves is out of scope (cards sort by updated_at DESC by default; sort dropdown covers name / created / updated).
+- **Frontend — Create page** (`src/js/create/`): a new toolbar button **"Bookmarks"** sits near the Generate Route control. Clicking it opens a popover listing the user's bookmarks (thumbnail, name, tag chips, distance from the current map centre) with a text-search box and a tag filter. Selecting a bookmark calls `POST /api/routes/<id>/waypoints/from-bookmark`; if the user had clicked on a leg first (the M2 Task 6 line-drag entry point) the selected leg's insert-position is forwarded and the bookmark lands mid-route, otherwise it appends at the tail. The picker is a single component (`src/js/shared/bookmark-picker.js`) mounted identically wherever a route editor surface exists — same behaviour on Create and (future M2-style) Analysis-edit contexts.
+- **Frontend — Analysis page marker context menu** (extends the M6 context menu on `src/js/analysis/`): new entry **"Save as bookmark"** — copies the current waypoint's `lat`, `lon`, `name`, `description` via `POST /api/bookmarks/from-waypoint/<wpt_id>`. Confirmation toast links to the new bookmark in the Library.
+- **Cross-route availability:** the picker only ever queries `GET /api/bookmarks` for the current user. There is no per-route scoping and no way to mark a bookmark as route-specific. Every route the user can edit sees the same full bookmark library.
+
+**Acceptance:**
+- Right-click a stop in Create/Analysis → "Save as bookmark" → new row visible on Library's Bookmarks tab with matching name, coords, description.
+- Create a bookmark from the Library "+ New bookmark" modal by clicking on the map → returns to the tab with the new card rendered.
+- Open an existing route on Create → click Bookmarks toolbar button → pick a bookmark → new `route_waypoints` row appears at the tail, route marked "needs regeneration".
+- Click on a leg first, then pick a bookmark → new waypoint is inserted at that leg's position, all downstream `position` values shifted (reuses `wp_model.insert_waypoint_at` from M2 Task 6).
+- Upload 3 photos to a bookmark → all three appear in the editor in upload order, reorder → order persists across reload; delete the first → disk file + thumb are gone.
+- Tag a bookmark with "viewpoint" → the tag cloud's usage count for "viewpoint" increments; filtering the Bookmarks tab by "viewpoint" shows that card.
+- Unit: `test_models_bookmarks.py` (CRUD, user-scoping, cascade-on-delete, uuid uniqueness), `test_api_bookmarks.py` (all endpoints, 404 on other-user bookmarks, 415 on bad MIME, 413 on oversize), `test_bookmark_photos.py` (Pillow thumbnail generation, fallback when Pillow missing), `test_from_waypoint_and_from_bookmark.py` (the two shortcut endpoints, position semantics, insert-at-position shift).
+- UI: `test_ui_bookmarks.py` — Library tab renders, "+ New bookmark" modal, Create-page picker insert (both append and insert-at-leg), Analysis "Save as bookmark" context-menu entry, photo upload + reorder + delete, tag-filter on the Bookmarks tab.
+- Migration: three new tables added idempotently at startup (same `CREATE TABLE IF NOT EXISTS` pattern as M1's recipe tables per `server/models/schema.sql`); existing DBs upgrade on first start with zero manual steps. `get_tags_with_counts` gains a bookmark-count union; existing tag-listing tests stay green.
+
+**Out (scope boundaries, deliberately rejected):**
+- **No cross-user sharing.** Bookmarks are strictly scoped to `user_id`; there is no "share bookmark" or "public bookmark" concept in M8. Aligns with the §7 non-goal on multi-user / collaboration.
+- **No collections, folders, or bookmark-of-bookmarks.** Tags are the only grouping primitive in M8. A "collections" feature can be added later as a separate milestone if demand emerges.
+- **No POI ingestion from OSM / Overpass.** Bookmarks are user-authored only; no "import nearby cafés" or map-layer-sourced bookmarks in M8. Overpass data in M6 is used exclusively for `exclude_polygons`, not for bookmark seeding.
+- **No comments, ratings, or visit-count tracking.** The fields are exactly the user-requested four: name, description, tags, optional photos. Future social/tracking features are out.
+- **No GPX-waypoint round-trip for bookmarks.** M4 GPX export still emits waypoints only for `route_waypoints` rows; bookmarks that weren't added to a route don't appear in any exported GPX.
 
 ## 6. Testing strategy
 

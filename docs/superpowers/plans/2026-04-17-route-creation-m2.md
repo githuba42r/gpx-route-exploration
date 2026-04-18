@@ -9,8 +9,9 @@
 **Scope boundaries:**
 - **In:** Edit button + slide-out panel, marker drag, add-by-click on the map, right-click context menu reusing M1's component, Regenerate Route button, Close/Discard (just closes — M1 persists immediately so there's nothing to "discard" in the M1 sense), disabled state for recipe-less routes.
 - **In (added mid-milestone):** Line-drag on the generated Valhalla polyline to insert a new waypoint mid-leg with automatic position renumbering — see Task 6.
+- **In (added mid-milestone):** Per-leg routing — every pin becomes a Valhalla break so each adjacent pair gets its own leg + cached polyline. Simplifies line-drag, eliminates the segment-projection workaround, and gives M3's optimiser a richer cost matrix — see Task 7.
 - **Out (M6):** "Convert GPX to recipe" heuristic for legacy routes.
-- **Out (M3):** Costing-preset UI, round-trip, optimise.
+- **Out (M3):** Costing-preset UI, round-trip, optimise. The `linked_to_previous` flag that keeps shape-waypoints attached to their preceding stop through optimiser reorders also lands in M3.
 
 **Mid-milestone pivot note:** The original M2 shipped an inline slide-out edit panel on the Analysis page (Tasks 1–5). User feedback after that landed was that combining view + edit on one screen was confusing, so we pivoted: the Analysis page now links out to `/create?route_id=<id>` (the Create page IS the editor), and a dirty-state guard prompts before navigating with unregenerated edits. The slide-out module + its tests were removed. Task 6 below adds line-drag on top of the pivoted UX.
 
@@ -840,7 +841,126 @@ git commit -m "feat(create): drag the generated route to insert a waypoint mid-l
 
 ---
 
-### Task 7: Manual verification + M2 close-out
+### Task 7: Per-leg routing — one Valhalla leg per adjacent waypoint pair
+
+**Feature:** Send every waypoint to Valhalla as `type: break` so the response contains one leg per adjacent pair (N-1 legs for N waypoints), regardless of whether a pin is a stop or a waypoint. This eliminates the through-type collapse that motivated the `insertionPositionForDrag` helper; line-drag becomes `leg.from_position + 1` again because each drawn polyline now maps 1:1 to a waypoint pair.
+
+**Why the refactor:** The Task 6 fix (segment projection) works but is clever and brittle. Per-leg routing is conceptually simpler and has a downstream win: M3's 2-opt optimiser needs a cost matrix of "distance between every pair we've routed", and per-leg caching gives it every adjacent pair for free. The `through` semantic Valhalla offers is a minor optimisation we don't otherwise use — we never surface turn-by-turn announcements where the difference would matter.
+
+**Files:**
+- Modify: `server/routing/valhalla_client.py` — drop the `type: break` vs `type: through` branching; all locations become breaks.
+- Modify: `server/blueprints/api_routing.py` — `expected_legs = len(wps) - 1` (plus 1 for round-trip), drop the `break_positions` bookkeeping.
+- Modify: `src/js/create/app.js` — `drawGeneratedRoute` goes back to using `leg.from_position` directly on each line; `startLineDrag` uses `line._legFromPosition + 1`; drop the `state.polylinePoints` plumbing.
+- Delete: `src/js/shared/insertion.js` — no longer needed.
+- Modify: `tests/test_routing_valhalla_client.py` — update the request-shape test (no through-type).
+- Modify: `tests/test_api_routing.py` — update the expected-legs test to reflect N-1 legs for N waypoints of any kind.
+- Modify: `tests/test_ui_create.py` — the multi-waypoint regression test stays (it still asserts correct insertion position) but is now exercising the simpler code path. Remove the `window.__computeInsertionPosition` hook.
+
+**Why before M3:** Simpler state is cheaper to reason about when adding the optimiser. And the richer per-leg cache is a direct M3 input.
+
+---
+
+- [ ] **Step 1 (valhalla_client test — failing):** Update `tests/test_routing_valhalla_client.py::test_request_body_shape` (or equivalent): every location should be `type: break`, no `through`.
+
+- [ ] **Step 2 (valhalla_client — implement):** In `build_request_body`, delete the `loc_type = "break" if ... else "through"` branch. Always use `break`:
+```python
+RADIUS_M = 100
+for lat, lon in waypoints:
+    locs.append({"lat": lat, "lon": lon, "type": "break", "radius": RADIUS_M})
+```
+`kinds` becomes unused by the client — leave the parameter in place (still passed from `api_routing.py`) but note in a comment that it's reserved for future per-kind costing.
+
+- [ ] **Step 3 (api_routing test — failing):** In `tests/test_api_routing.py`, add/update a case: 4 waypoints of kind=`waypoint` → expect 3 legs (not 1). Adjust any existing tests that assumed through-collapse.
+
+- [ ] **Step 4 (api_routing — implement):** In `generate_route`:
+```python
+n = len(wps)
+expected_legs = n - 1
+if opts.get("round_trip"):
+    expected_legs = n  # closing leg back to the first waypoint
+if len(parsed_legs) != expected_legs:
+    return jsonify({
+        "error": "Upstream routing service failed",
+        "detail": f"Valhalla returned {len(parsed_legs)} legs, expected {expected_legs}",
+    }), 502
+
+# Every waypoint is a break now, so every adjacent pair is its own leg.
+legs_rows = []
+for i, leg in enumerate(parsed_legs):
+    from_pos = wps[i]["position"]
+    to_pos = wps[(i + 1) % n]["position"] if opts.get("round_trip") else wps[i + 1]["position"]
+    legs_rows.append({
+        "from_position": from_pos,
+        "to_position": to_pos,
+        "distance_m": leg["distance_m"],
+        "duration_s": leg["duration_s"],
+        "polyline": leg["polyline"],
+    })
+```
+Drop the `break_positions` computation entirely.
+
+- [ ] **Step 5 (frontend — simplify drawGeneratedRoute):** In `src/js/create/app.js`:
+```javascript
+function drawGeneratedRoute(state, legs) {
+  clearGeneratedLayer(state);
+  if (!legs || !legs.length) return;
+  const group = L.featureGroup();
+  let drewAnyLeg = false;
+  legs.forEach((leg) => {
+    if (!leg.polyline) return;
+    const latlngs = decodePolyline(leg.polyline, 6);
+    if (latlngs.length < 2) return;
+    const line = L.polyline(latlngs, {
+      color: state.routeColor, weight: 4, opacity: 0.9, interactive: true,
+    });
+    line._legFromPosition = leg.from_position;
+    line.on('mousedown', (ev) => startLineDrag(state, line, ev));
+    group.addLayer(line);
+    drewAnyLeg = true;
+  });
+  if (!drewAnyLeg) return;
+  group.addTo(state.map);
+  state.generatedLayer = group;
+  updatePreviewLine(state);
+}
+```
+Drop the `flat` array, the `state.polylinePoints` plumbing, and the `window.__computeInsertionPosition` hook.
+
+- [ ] **Step 6 (frontend — simplify startLineDrag):** `startLineDrag(state, line, mouseEvent)` goes back to reading `line._legFromPosition`:
+```javascript
+await api.insertWaypointAt(state.routeId, line._legFromPosition + 1, {
+  name: 'Waypoint', lat: snap.lat, lon: snap.lon, kind: 'waypoint',
+});
+```
+No segment-projection call.
+
+- [ ] **Step 7 (delete dead code):**
+```
+git rm src/js/shared/insertion.js
+```
+Remove its import from `app.js` and the `window.__computeInsertionPosition` exposure. Remove the `polylinePoints` field from the initial `state` object.
+
+- [ ] **Step 8 (update UI regression test):** In `tests/test_ui_create.py::test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route`, stop calling `window.__computeInsertionPosition`. Instead replace the asserts with real mouse drags on the rendered leg polylines (the 6-waypoint fixture now produces 5 distinct interactive lines; find the one with `_legFromPosition = 4` via a small JS helper and drag on its midpoint). Keep the assertion: after the drag, the route-listing API returns 7 rows with positions `[0, 1, 2, 3, 4, 5, 6]` and the new row at position 5.
+
+- [ ] **Step 9:** `npm run build` and run the full regression:
+```
+pytest tests/ --ignore=tests/test_ui_analysis.py
+```
+
+- [ ] **Step 10 (commit):**
+```
+git commit -m "refactor(routing): every waypoint is a break — one leg per adjacent pair"
+```
+
+**Acceptance:**
+- 6 waypoints of any kind mix → 5 legs returned, 5 interactive polylines rendered.
+- Line-drag on the segment between WP5 and WP6 inserts at position 5, without consulting any insertion helper.
+- `src/js/shared/insertion.js` is gone; `state.polylinePoints` is gone; the bug cannot recur.
+- M3 can treat `route_legs` as a (sparse) cost matrix where every currently-visible adjacency has real network data.
+
+---
+
+### Task 8: Manual verification + M2 close-out
 
 - [ ] Start dev server: `./dev.sh --env-file .env.development`.
 - [ ] Create a recipe route via `/create`, drop some pins, Generate → land on analysis page.
@@ -849,6 +969,7 @@ git commit -m "feat(create): drag the generated route to insert a waypoint mid-l
 - [ ] Right-click a pin → context menu (toggle kind, include/exclude, delete).
 - [ ] Ctrl+click on an empty area → new stop appears.
 - [ ] **Line-drag** on the generated route polyline → ghost follows the cursor, drop inserts a waypoint between the correct neighbours; sidebar reflows in order; auto-regenerate picks it up.
+- [ ] With 6 waypoints of kind=waypoint, the Create page draws **5 distinct interactive polylines** (one per adjacent pair), and a drag on any one of them inserts at the correct position — the Task 7 per-leg refactor is load-bearing here.
 - [ ] Create page: **Route Analysis** nav link returns to `/route/<id>`.
 - [ ] Make an edit but don't regenerate, click Library → confirm dialog offers Regenerate-then-leave vs. Leave-anyway.
 - [ ] Open a legacy (GPX-only) route → Edit button in Analysis nav disabled with tooltip.
