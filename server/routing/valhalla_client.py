@@ -95,26 +95,29 @@ def parse_legs(response):
 
     When the request had `elevation_interval` set, every leg carries:
       - elevation: flat list of metre samples along the shape
-      - elevation_interval_m: spacing between samples (metres)
+      - elevation_interval: spacing between samples (metres) — Valhalla
+        echoes this per leg (verified against a live capture, see
+        tests/fixtures/valhalla_response_sample.json)
     Absent elevation yields [] + the default spacing — the post-processor
     handles empty series by emitting None warnings.
     """
     trip = response.get("trip") or {}
     legs = trip.get("legs") or []
-    # elevation_interval echoes back at the response top level; fall back
-    # to the value build_request_body always sends.
-    elevation_interval = response.get("elevation_interval", 10.0)
+    # Prefer the per-leg echo; older responses only echo it at the trip
+    # top level; fall back to the value build_request_body always sends.
+    default_interval = response.get("elevation_interval", 10.0)
     out = []
     for leg in legs:
         summary = leg.get("summary") or {}
         length_km = summary.get("length", 0.0)
         time_s = summary.get("time", 0.0)
         shape = leg.get("shape") or ""
+        interval = leg.get("elevation_interval") or default_interval
         out.append({
             "distance_m": float(length_km) * 1000.0,
             "duration_s": float(time_s),
             "polyline": shape,
             "elevation": leg.get("elevation") or [],
-            "elevation_interval_m": float(elevation_interval),
+            "elevation_interval_m": float(interval),
         })
     return out

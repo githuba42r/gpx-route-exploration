@@ -61,7 +61,10 @@ def test_call_success(app):
             waypoints=[(-27.4, 152.9), (-27.5, 152.8), (-27.6, 152.7)],
             profile="bicycle",
         )
-    assert resp["trip"]["legs"][0]["summary"]["length"] == 2.0
+    # Fixture is a live Valhalla capture — assert it round-trips rather
+    # than hard-coding distances that break on regeneration.
+    assert resp["trip"]["legs"][0]["summary"]["length"] == \
+        fake["trip"]["legs"][0]["summary"]["length"]
     assert len(resp["trip"]["legs"]) == 2
 
 
@@ -109,9 +112,43 @@ def test_parse_legs_decodes_shape():
         fake = json.load(f)
     legs = vc.parse_legs(fake)
     assert len(legs) == 2
-    assert legs[0]["distance_m"] == 2000.0  # km → m
-    assert legs[0]["duration_s"] == 360.0
-    assert legs[0]["polyline"] == fake["trip"]["legs"][0]["shape"]
+    src = fake["trip"]["legs"][0]
+    assert legs[0]["distance_m"] == src["summary"]["length"] * 1000.0  # km → m
+    assert legs[0]["duration_s"] == src["summary"]["time"]
+    assert legs[0]["polyline"] == src["shape"]
+
+
+def test_fixture_is_live_capture_with_elevation():
+    """M3c-1: the shared fixture must be a real Valhalla response taken
+    with elevation_interval set, so post-processor tests and parse_legs
+    exercise the actual schema rather than an assumed one."""
+    with open(os.path.join(FIXTURES, "valhalla_response_sample.json")) as f:
+        sample = json.load(f)
+    legs = sample["trip"]["legs"]
+    assert len(legs) >= 2
+    for leg in legs:
+        assert "elevation" in leg, f"no 'elevation' in leg keys: {list(leg.keys())}"
+        assert leg["elevation_interval"] == 10.0
+        assert all(isinstance(x, (int, float)) for x in leg["elevation"])
+        assert len(leg["elevation"]) > 1
+
+
+def test_parse_legs_prefers_leg_level_elevation_interval():
+    """Live Valhalla echoes elevation_interval on each leg, not (only)
+    at the trip top level — parse_legs reads the leg value first."""
+    forged = {
+        "trip": {
+            "legs": [{
+                "summary": {"length": 1.0, "time": 300.0},
+                "shape": "abc",
+                "elevation": [10.0, 11.0],
+                "elevation_interval": 5.0,
+            }],
+            "summary": {"length": 1.0, "time": 300.0},
+        },
+        "elevation_interval": 10.0,
+    }
+    assert vc.parse_legs(forged)[0]["elevation_interval_m"] == 5.0
 
 
 def test_parse_legs_includes_elevation_and_interval():
