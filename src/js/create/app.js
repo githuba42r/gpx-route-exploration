@@ -18,6 +18,7 @@ import { renderMarkers } from '../shared/waypoint-markers.js';
 import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
+import { openCsvImport } from '../shared/csv-import.js';
 
 // Leading-edge debounce semantics:
 //   - A waypoint change fires /generate IMMEDIATELY (if eligible).
@@ -748,6 +749,10 @@ function renderGenerateControl(state) {
 
   if (state.isGenerating) {
     variant = 'busy'; iconText = '⏳'; labelText = 'Generating…'; disabled = true;
+  } else if (state.importing) {
+    // CSV import in flight: the waypoint list is changing under us.
+    variant = state.autoGenerate ? 'ready' : 'manual';
+    iconText = '⚡'; labelText = 'Generate Now'; disabled = true;
   } else if (state.autoGenerate && state.cooldownTimer && inCooldown(state)) {
     variant = 'cooldown'; iconText = '';
     labelText = 'Generate Now';
@@ -1169,6 +1174,39 @@ async function main() {
       maybeFireGenerate(state, { bypassCooldown: true });
       ensureRenderLoop(state);
     }
+  });
+
+  // CSV append: the route always exists by now (ensureRouteId at startup).
+  document.getElementById('btn-import-csv').addEventListener('click', () => {
+    const finish = async () => {
+      if (!state.importing) return;
+      state.importing = false;
+      renderGenerateControl(state);
+      await reloadWaypoints(state, editor);
+      fitToWaypoints(state.map, state.waypoints.filter(w => w.included !== 0));
+      if (state.autoGenerate && state.waypoints.length >= 2) {
+        maybeFireGenerate(state);
+        ensureRenderLoop(state);
+      }
+    };
+    openCsvImport({
+      routeId: state.routeId,
+      defaultTitle: document.getElementById('route-title').value.trim(),
+      onStart: () => {
+        state.importing = true;
+        renderGenerateControl(state);
+        // Cancel/backdrop close mid-import never calls onDone; don't leave
+        // Generate disabled. finish() is idempotent via state.importing.
+        const overlay = document.getElementById('csv-import-overlay');
+        if (overlay) {
+          const mo = new MutationObserver(() => {
+            if (!overlay.isConnected) { mo.disconnect(); finish(); }
+          });
+          mo.observe(document.body, { childList: true });
+        }
+      },
+      onDone: finish,
+    });
   });
 
   // Dropdown arrow toggles the menu.

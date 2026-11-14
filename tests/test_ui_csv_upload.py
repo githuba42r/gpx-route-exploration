@@ -80,3 +80,101 @@ def test_stream_failure_shows_recovery_link(page, server_url, tmp_path):
     expect(page.locator("#csv-import-start")).to_be_disabled()
     page.locator("#csv-import-close").click()
     expect(page.locator("#csv-import-overlay")).to_have_count(0)
+
+
+# ---------------------------------------------------------------- Create page
+
+
+def _goto_create(page, server_url, route_id=None):
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    q = f"?route_id={route_id}" if route_id else ""
+    page.goto(f"{server_url}/create{q}")
+    page.wait_for_function(
+        "() => new URL(location.href).searchParams.get('route_id') !== null",
+        timeout=5000,
+    )
+    page.wait_for_function("() => window.__appReady === true", timeout=10000)
+
+
+def _click_map_at(page, fx, fy):
+    box = page.locator("#map").bounding_box()
+    page.mouse.click(box["x"] + box["width"] * fx, box["y"] + box["height"] * fy)
+
+
+def _coord_csv(n, prefix="P"):
+    lines = ["Name,Lat,Lon"]
+    for i in range(n):
+        lines.append(f"{prefix}{i + 1},{51.50 + i * 0.01:.2f},{-0.10 - i * 0.01:.2f}")
+    return "\n".join(lines) + "\n"
+
+
+def _import_on_create(page, path):
+    page.locator("#btn-import-csv").click()
+    page.set_input_files("#csv-file-input", path)
+    page.locator("#csv-import-start").click()
+
+
+def test_create_page_append_adds_rows_after_manual_waypoints(
+    page, server_url, tmp_path
+):
+    _goto_create(page, server_url)
+    _click_map_at(page, 0.3, 0.4)
+    expect(page.locator(".wpe-item")).to_have_count(1)
+    _click_map_at(page, 0.6, 0.4)
+    expect(page.locator(".wpe-item")).to_have_count(2)
+    _import_on_create(page, _write_csv(tmp_path, _coord_csv(5)))
+    expect(page.locator("#csv-import-overlay")).to_have_count(0, timeout=20000)
+    expect(page.locator(".wpe-item")).to_have_count(7)
+    assert re.search(r"route_id=\d+", page.url)
+    expect(page.locator("#btn-gen-primary")).to_be_enabled()
+
+
+def test_append_to_saved_route_via_edit_url(page, server_url, tmp_path):
+    rid = http_requests.post(
+        f"{server_url}/api/routes", json={"title": "append-saved"}
+    ).json()["id"]
+    for i in range(4):
+        http_requests.post(
+            f"{server_url}/api/routes/{rid}/waypoints",
+            json={"name": f"Orig{i + 1}", "lat": 40.0 + i * 0.01,
+                  "lon": 10.0, "kind": "waypoint"},
+        )
+    _goto_create(page, server_url, rid)
+    expect(page.locator(".wpe-item")).to_have_count(4)
+    _import_on_create(page, _write_csv(tmp_path, _coord_csv(3, "New")))
+    expect(page.locator("#csv-import-overlay")).to_have_count(0, timeout=20000)
+    expect(page.locator(".wpe-item")).to_have_count(7)
+    wps = http_requests.get(f"{server_url}/api/routes/{rid}/waypoints").json()
+    assert len(wps) == 7
+    assert [w["name"] for w in wps] == [
+        "Orig1", "Orig2", "Orig3", "Orig4", "New1", "New2", "New3"
+    ]
+
+
+def test_import_button_works_before_any_waypoint_exists(
+    page, server_url, tmp_path
+):
+    _goto_create(page, server_url)
+    expect(page.locator(".wpe-item")).to_have_count(0)
+    _import_on_create(page, _write_csv(tmp_path, _coord_csv(3)))
+    expect(page.locator("#csv-import-overlay")).to_have_count(0, timeout=20000)
+    expect(page.locator(".wpe-item")).to_have_count(3)
+    rid = re.search(r"route_id=(\d+)", page.url).group(1)
+    wps = http_requests.get(f"{server_url}/api/routes/{rid}/waypoints").json()
+    assert len(wps) == 3
+
+
+def test_append_stream_failure_refresh_reloads_editor(page, server_url, tmp_path):
+    _goto_create(page, server_url)
+    page.route(
+        "**/api/geocode/csv/*/stream",
+        lambda route: route.fulfill(status=500, body="x"),
+    )
+    _import_on_create(page, _write_csv(tmp_path, _coord_csv(3)))
+    refresh = page.locator("#csv-import-refresh")
+    expect(refresh).to_be_visible(timeout=20000)
+    expect(page.locator("#btn-gen-primary")).to_be_disabled()
+    refresh.click()
+    expect(page.locator("#csv-import-overlay")).to_have_count(0)
+    expect(page.locator(".wpe-item")).to_have_count(3, timeout=20000)
+    expect(page.locator("#btn-gen-primary")).to_be_enabled()
