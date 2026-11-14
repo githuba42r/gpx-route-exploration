@@ -42,7 +42,10 @@ def parse_csv(data: bytes, mapping: dict, *, max_rows: int) -> list:
         delimiter = ","
 
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
-    records = [r for r in reader if any(c.strip() for c in r)]
+    try:
+        records = [r for r in reader if any(c.strip() for c in r)]
+    except csv.Error as exc:
+        raise CsvImportError("The file is not a valid CSV") from exc
     if not records:
         raise CsvImportError("The CSV file is empty")
     header = [h.strip() for h in records[0]]

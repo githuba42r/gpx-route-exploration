@@ -79,3 +79,9 @@ def test_over_max_rows_raises():
 def test_latin1_fallback():
     rows = p("name,address\ncafé,x\n", {"name": "name", "address": "address"}, enc="latin-1")
     assert rows[0]["name"] == "café"
+
+
+def test_oversized_cell_raises_csv_import_error():
+    text = "name,address\n" + "x" * 200_000 + ",a\n"
+    with pytest.raises(CsvImportError, match="not a valid CSV"):
+        p(text, {"address": "address"})
