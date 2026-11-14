@@ -77,6 +77,13 @@
 <!-- Full-width error panel — appears when /generate fails, replaces the old alert(). -->
 <div id="generate-error" style="display:none;"></div>
 
+<div id="address-bar">
+  <input id="add-address" type="text" placeholder="Add by address…" autocomplete="off"
+         aria-label="Add a stop by address">
+  <span id="address-status" aria-live="polite"></span>
+  <ul id="address-suggestions" role="listbox"></ul>
+</div>
+
 <div id="create-main">
   <div id="map" style="position:relative;"></div>
   <aside id="editor-panel"></aside>

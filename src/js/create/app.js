@@ -19,6 +19,7 @@ import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
 import { openCsvImport } from '../shared/csv-import.js';
+import { initAddressSearch } from './address-search.js';
 
 // Leading-edge debounce semantics:
 //   - A waypoint change fires /generate IMMEDIATELY (if eligible).
@@ -1211,6 +1212,18 @@ async function main() {
       },
       onDone: finish,
     });
+  });
+
+  // Add by address: append a stop at the picked geocode result.
+  initAddressSearch({
+    input: document.getElementById('add-address'),
+    list: document.getElementById('address-suggestions'),
+    status: document.getElementById('address-status'),
+    onSelect: async ({ name, address, lat, lon }) => {
+      await api.appendWaypoint(state.routeId, { name, lat, lon, kind: 'stop', address });
+      await onWaypointsChanged(state, editor);
+      state.map.panTo([lat, lon]);
+    },
   });
 
   // Dropdown arrow toggles the menu.
