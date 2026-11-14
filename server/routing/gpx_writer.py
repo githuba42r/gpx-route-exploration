@@ -1,4 +1,4 @@
-"""GPX 1.1 writer. M1 writes <trk> only. M4 extends with <wpt> entries."""
+"""GPX 1.1 writer. Writes <metadata>, optional <wpt> recipe entries, and <trk>."""
 
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -50,12 +50,15 @@ def encode_polyline(points, precision=6):
     return "".join(result)
 
 
-def write_track_gpx(path, *, title, legs, precision=6):
-    """Write a track-only GPX file.
+def write_track_gpx(path, *, title, legs, precision=6, waypoints=None):
+    """Write a GPX file with a track and optional recipe waypoints.
 
     legs: list of dicts, each with a 'polyline' key (encoded polyline).
           Consecutive legs are concatenated and the duplicate boundary
           point is dropped.
+    waypoints: optional list of dicts (name, lat, lon, kind "stop"|"waypoint",
+          optional description). Each is written as a <wpt> between
+          <metadata> and <trk>; <desc> is omitted when empty.
     """
     all_points = []
     for i, leg in enumerate(legs):
@@ -73,6 +76,13 @@ def write_track_gpx(path, *, title, legs, precision=6):
     })
     meta = ET.SubElement(gpx, "metadata")
     ET.SubElement(meta, "name").text = title
+
+    for w in waypoints or []:
+        wpt = ET.SubElement(gpx, "wpt", {"lat": f"{w['lat']:.7f}", "lon": f"{w['lon']:.7f}"})
+        ET.SubElement(wpt, "name").text = w["name"]
+        if w.get("description"):
+            ET.SubElement(wpt, "desc").text = w["description"]
+        ET.SubElement(wpt, "type").text = w["kind"]
 
     trk = ET.SubElement(gpx, "trk")
     ET.SubElement(trk, "name").text = title

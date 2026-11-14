@@ -129,7 +129,18 @@ def generate_route(route_id):
     wp_model.update_options(route_id, last_generated_at=int(time.time()))
 
     gpx_path = _resolve_gpx_path(current_app, user_id, route)
-    write_track_gpx(gpx_path, title=route["title"], legs=parsed_legs)
+    write_track_gpx(gpx_path, title=route["title"], legs=parsed_legs,
+        waypoints=[
+            {
+                "name": w.get("name") or "",
+                "lat": w["lat"],
+                "lon": w["lon"],
+                "kind": w.get("kind") or "stop",
+                "description": w.get("description"),
+            }
+            for w in wps
+        ],
+    )
 
     summary = (response.get("trip") or {}).get("summary") or {}
     distance_km = float(summary.get("length") or 0.0)
