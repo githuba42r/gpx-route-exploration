@@ -177,8 +177,7 @@ def test_upload_with_wpt_creates_recipe(client):
     assert resp.status_code == 201
     rid = resp.get_json()["id"]
     wps = client.get(f"/api/routes/{rid}/waypoints").get_json()
-    if isinstance(wps, dict):
-        wps = wps.get("waypoints", wps)
+    assert isinstance(wps, list)
     assert [w["kind"] for w in wps] == ["stop", "waypoint", "waypoint"]
     assert [w["position"] for w in wps] == [0, 1, 2]
     assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is True
@@ -190,8 +189,7 @@ def test_upload_without_wpt_has_no_recipe(client):
     assert resp.status_code == 201
     rid = resp.get_json()["id"]
     wps = client.get(f"/api/routes/{rid}/waypoints").get_json()
-    if isinstance(wps, dict):
-        wps = wps.get("waypoints", wps)
+    assert isinstance(wps, list)
     assert wps == []
     assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is False
 
