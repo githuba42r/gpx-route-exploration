@@ -1,0 +1,30 @@
+.convert-overlay {
+  position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.convert-box {
+  background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+  padding: 24px; width: 460px; max-width: 92vw; color: #e0e0e0; font-size: 0.9em;
+}
+.convert-title { font-size: 1em; color: #ff9f43; margin: 0 0 12px; }
+.convert-row { display: flex; flex-direction: column; gap: 4px; font-size: 0.85em; }
+.convert-box input[type=number] {
+  width: 90px; background: #1a1a2e; color: #e0e0e0;
+  border: 1px solid #0f3460; border-radius: 4px; padding: 5px;
+}
+.convert-error { color: #e94560; margin-top: 10px; min-height: 1em; }
+.convert-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.convert-btn {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 4px;
+  background: transparent; color: #e0e0e0; cursor: pointer; font-size: 0.85em;
+}
+.convert-btn-primary { background: #e94560; border-color: #e94560; color: #fff; }
+.convert-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Make room for the busy ring (top-right) and keep it visible on the red button. */
+.convert-btn.is-busy { padding-right: 32px; }
+.convert-btn-primary.is-busy::after { border-color: rgba(255,255,255,0.35); border-top-color: #fff; }
+#btn-convert-recipe {
+  background: #e94560; color: #fff; border: none; border-radius: 4px;
+  padding: 4px 12px; cursor: pointer; font-size: 0.9em; margin-left: 8px;
+}
+#btn-convert-recipe:hover { background: #c93651; }

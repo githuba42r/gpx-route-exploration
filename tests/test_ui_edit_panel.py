@@ -80,7 +80,7 @@ def test_edit_button_disabled_for_gpx_only_route(page, server_url):
     btn = page.locator("#btn-open-edit")
     expect(btn).to_be_disabled()
     title = btn.get_attribute("title") or ""
-    assert "no recipe" in title.lower()
+    assert title == "Convert to a recipe first to edit this route"
 
 
 def test_edit_button_links_to_create_for_recipe_route(page, server_url):

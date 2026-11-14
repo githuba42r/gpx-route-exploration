@@ -18,6 +18,7 @@ import { initProfile } from './profile.js';
 import { initContextMenu } from './context-menu.js';
 import { initSettings } from './settings.js';
 import { initNav } from './nav.js';
+import { initConvertRecipe } from './convert-recipe.js';
 
 async function main() {
   const { points, trackName } = await loadGPX();
@@ -171,6 +172,7 @@ async function main() {
 
   // Nav (no-op for now)
   initNav();
+  initConvertRecipe();
   // Edit Route in the nav is now a plain anchor navigating to /create?route_id=<id>
   // (the Create page serves as the editor). No JS needed here.
 }

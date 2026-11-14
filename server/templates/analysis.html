@@ -11,7 +11,8 @@
 <a id="btn-open-edit" href="/create?route_id={{ route.id }}" title="Open this route in the editor">Edit Route</a>
 {% else %}
 <button id="btn-open-edit" type="button" disabled
-        title="This route has no recipe — 'Convert to recipe' ships in M6">Edit Route</button>
+        title="Convert to a recipe first to edit this route">Edit Route</button>
+<button id="btn-convert-recipe" type="button">Convert to recipe…</button>
 {% endif %}
 {% endblock %}
 {% block content %}
