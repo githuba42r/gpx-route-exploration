@@ -95,3 +95,16 @@ def test_geocode_rate_limit_waits_between_network_calls(app):
         geocode_address("first")  # cache hit
         assert sleep.call_count == 1
     assert get.call_count == 2
+
+
+def test_rate_limit_default_is_1000_ms(monkeypatch):
+    import importlib
+    import server.config as config
+
+    monkeypatch.delenv("NOMINATIM_RATE_LIMIT_MS", raising=False)
+    try:
+        importlib.reload(config)
+        assert config.Config.NOMINATIM_RATE_LIMIT_MS == 1000
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
