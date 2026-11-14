@@ -203,3 +203,71 @@ def test_upload_with_only_bad_wpt_still_succeeds(client):
     assert resp.status_code == 201
     rid = resp.get_json()["id"]
     assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is False
+
+
+# --- Export endpoint + round trip -------------------------------------------
+
+def test_export_serves_stored_file_as_attachment(client):
+    with open("tests/fixtures/sample.gpx", "rb") as f:
+        original = f.read()
+    rid = _upload(client, original).get_json()["id"]
+    resp = client.get(f"/api/routes/{rid}/export.gpx")
+    assert resp.status_code == 200
+    assert resp.data == original
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert resp.mimetype == "application/gpx+xml"
+
+
+def test_export_unknown_route_404(client):
+    resp = client.get("/api/routes/99999/export.gpx")
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Not found"}
+
+
+def test_export_never_generated_recipe_route_404(client):
+    rid = client.post("/api/routes", json={"title": "Rec", "profile": "bicycle"}).get_json()["id"]
+    resp = client.get(f"/api/routes/{rid}/export.gpx")
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "Route has no GPX file yet — generate it first"}
+
+
+def test_roundtrip_recipe_survives_export_and_reimport(client):
+    rid = client.post("/api/routes", json={"title": "Rec", "profile": "bicycle"}).get_json()["id"]
+    specs = [
+        ("Start", -27.400000, 152.900000, "stop", None),
+        ("Café & <Bar>", -27.410000, 152.910000, "stop", "Say \"hi\" 🚴"),
+        ("Via one", -27.420000, 152.920000, "waypoint", None),
+        ("Hill", -27.430000, 152.930000, "stop", "Steep"),
+        ("Via two", -27.440000, 152.940000, "waypoint", ""),
+    ]
+    for name, lat, lon, kind, desc in specs:
+        body = {"name": name, "lat": lat, "lon": lon, "kind": kind}
+        if desc is not None:
+            body["description"] = desc
+        r = client.post(f"/api/routes/{rid}/waypoints", json=body)
+        assert r.status_code in (200, 201), r.data
+
+    legs = []
+    for (_, la1, lo1, *_r), (_, la2, lo2, *_r2) in zip(specs, specs[1:]):
+        shape = encode_polyline([(la1, lo1), (la2, lo2)], precision=6)
+        legs.append({"summary": {"length": 1.0, "time": 100.0}, "shape": shape})
+    fake = {"trip": {"legs": legs, "summary": {"length": 4.0, "time": 400.0}}}
+    with patch("server.routing.valhalla_client.requests.post") as mock_post:
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = fake
+        mock_post.return_value.raise_for_status = lambda: None
+        resp = client.post(f"/api/routes/{rid}/generate")
+    assert resp.status_code == 200, resp.data
+
+    exp = client.get(f"/api/routes/{rid}/export.gpx")
+    assert exp.status_code == 200
+    new_id = _upload(client, exp.data).get_json()["id"]
+
+    def norm(route_id):
+        wps = client.get(f"/api/routes/{route_id}/waypoints").get_json()
+        return [(w["name"], round(w["lat"], 6), round(w["lon"], 6), w["kind"],
+                 (w.get("description") or None)) for w in wps]
+
+    original = norm(rid)
+    assert len(original) == 5
+    assert norm(new_id) == original

@@ -30,6 +30,29 @@ def serve_gpx(route_id):
     )
 
 
+@bp.route("/routes/<int:route_id>/export.gpx", methods=["GET"])
+def export_gpx(route_id):
+    user_id = get_current_user()
+    route = get_route(user_id, route_id)
+    if route is None:
+        return jsonify({"error": "Not found"}), 404
+
+    data_dir = current_app.config["DATA_DIR"]
+    file_path = _find_gpx_file(data_dir, user_id, route["storage_name"])
+    if file_path is None or not os.path.exists(file_path):
+        return jsonify({"error": "Route has no GPX file yet — generate it first"}), 404
+
+    name = route["filename"] or f"route-{route_id}"
+    if not name.lower().endswith(".gpx"):
+        name += ".gpx"
+    return send_file(
+        file_path,
+        mimetype="application/gpx+xml",
+        as_attachment=True,
+        download_name=name,
+    )
+
+
 def _find_gpx_file(data_dir, user_id, storage_name):
     """Search for a GPX file by storage_name under data_dir/gpx/user_id/."""
     user_gpx_dir = os.path.join(data_dir, "gpx", user_id)
