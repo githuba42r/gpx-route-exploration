@@ -12,3 +12,6 @@ class Config:
     BACKUP_DAILY_KEEP = int(os.environ.get("BACKUP_DAILY_KEEP", "7"))
     BACKUP_WEEKLY_KEEP = int(os.environ.get("BACKUP_WEEKLY_KEEP", "6"))
     BACKUP_MONTHLY_KEEP = int(os.environ.get("BACKUP_MONTHLY_KEEP", "13"))
+    NOMINATIM_RATE_LIMIT_MS = int(os.environ.get("NOMINATIM_RATE_LIMIT_MS", "1100"))
+    CSV_MAX_BYTES = int(os.environ.get("CSV_MAX_BYTES", str(2 * 1024 * 1024)))
+    CSV_MAX_ROWS = int(os.environ.get("CSV_MAX_ROWS", "500"))

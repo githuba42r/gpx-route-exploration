@@ -88,3 +88,11 @@ CREATE TABLE IF NOT EXISTS route_legs (
     warnings        TEXT,
     PRIMARY KEY (route_id, from_position, to_position)
 );
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    query        TEXT PRIMARY KEY,
+    lat          REAL,
+    lon          REAL,
+    display_name TEXT,
+    created_at   INTEGER NOT NULL
+);
