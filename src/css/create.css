@@ -225,3 +225,8 @@
 .wpe-warn-badge[title] {
   cursor: help;
 }
+
+/* M7: mobile-only header affordances are hidden on desktop; the secondary
+ * wrapper is layout-transparent so the desktop header is unchanged. */
+#create-secondary { display: contents; }
+#btn-header-more, #create-hint-touch, .sheet-handle { display: none; }

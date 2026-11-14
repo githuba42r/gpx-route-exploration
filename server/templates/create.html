@@ -13,7 +13,10 @@
 <div id="create-header">
   <input id="route-title" type="text" placeholder="Route title…" value="Untitled Route">
   <span id="create-hint">Click = drop waypoint · Ctrl+click = drop stop · right-click a pin for more · dashed line = preview.</span>
+  <span id="create-hint-touch">Tap = drop waypoint · long-press a pin for more</span>
   <div style="flex:1;"></div>
+  <button id="btn-header-more" type="button" aria-expanded="false" aria-controls="create-secondary">Options ▾</button>
+  <div id="create-secondary">
   <!-- Preset dropdown — replaces the M1 disabled profile picker. -->
   <label for="route-preset" style="margin-right:4px;">Preset:</label>
   <select id="route-preset" title="Routing preset — controls profile, surface preference, hill tolerance">
@@ -34,6 +37,7 @@
   </label>
   <button id="btn-import-csv" type="button" title="Append waypoints from a CSV file">Import CSV</button>
   <button id="btn-optimise" type="button" title="Reorder stops for shortest route — respects pins + linked waypoints">Optimise</button>
+  </div>
 
   <!-- Single split-button for everything Generate-related. The primary
        button's appearance changes with state (manual / ready / debounce /

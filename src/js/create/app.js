@@ -20,6 +20,7 @@ import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
 import { openCsvImport } from '../shared/csv-import.js';
 import { initAddressSearch } from './address-search.js';
+import { initBottomSheet } from './bottom-sheet.js';
 
 // Leading-edge debounce semantics:
 //   - A waypoint change fires /generate IMMEDIATELY (if eligible).
@@ -330,6 +331,12 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
     menu.style.top = ev.clientY + 'px';
   }
   menu.style.display = 'block';
+  // Keep the menu inside the viewport (small screens / bottom-sheet rows).
+  const mr = menu.getBoundingClientRect();
+  const maxL = Math.max(0, window.innerWidth - mr.width - 4);
+  const maxT = Math.max(0, window.innerHeight - mr.height - 4);
+  if (mr.left > maxL) menu.style.left = maxL + 'px';
+  if (mr.top > maxT) menu.style.top = maxT + 'px';
 
   menu.querySelectorAll('button[data-act]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
@@ -1082,6 +1089,20 @@ function markNeedsRegen(state) {
 
 // -------------------- main --------------------
 
+// Mobile: secondary header controls collapse behind an Options toggle.
+function initHeaderOptionsToggle() {
+  const btn = document.getElementById('btn-header-more');
+  const header = document.getElementById('create-header');
+  if (!btn || !header) return;
+  btn.addEventListener('click', () => {
+    const open = !header.classList.contains('more-open');
+    header.classList.toggle('more-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (state_map()) state_map().invalidateSize();
+  });
+}
+function state_map() { return window.__appState && window.__appState.map; }
+
 async function main() {
   const state = {
     routeId: null,
@@ -1162,6 +1183,8 @@ async function main() {
   // edits. Stashing the editor on state avoids threading it through
   // every call site.
   state.editor = editor;
+  initBottomSheet({ panel: document.getElementById('editor-panel'), map: state.map });
+  initHeaderOptionsToggle();
 
   await initOptionsUI(state);
 

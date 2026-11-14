@@ -26,4 +26,42 @@
     background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
   }
   #drawer-scrim.is-open { opacity: 1; pointer-events: auto; }
+
+  /* Create: stacked map + bottom sheet */
+  #stop-edit-modal { min-width: 0; width: 92vw; box-sizing: border-box; max-height: 90dvh; overflow: auto; }
+  #create-hint { display: none; }
+  #create-hint-touch { display: block; flex: 1 1 100%; color: #a0a0b0; font-size: 0.75em; }
+  #btn-header-more { display: inline-flex; align-items: center; }
+  #create-secondary { display: none; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #create-header.more-open #create-secondary { display: flex; }
+  #create-header { padding: 6px 10px; gap: 6px; }
+  #create-header > div[style*="flex:1"] { display: none; }
+  #create-secondary label { min-width: 0; }
+  #generate-status { max-width: 100%; overflow-wrap: anywhere; }
+  #route-title { text-overflow: ellipsis; }
+  #create-main { flex-direction: column; overflow: hidden; }
+  #map { flex: 1 1 auto; min-height: 0; width: 100%; }
+  #editor-panel {
+    flex: none; width: 100%; box-sizing: border-box;
+    border-left: none; border-top: 2px solid #0f3460;
+    display: flex; flex-direction: column; overflow: hidden;
+    transition: height 0.2s ease;
+    height: 28dvh;
+  }
+  #editor-panel[data-sheet="peek"] { height: 56px; }
+  #editor-panel[data-sheet="half"] { height: 28dvh; }
+  #editor-panel[data-sheet="full"] {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0; height: auto; z-index: 900;
+  }
+  #editor-panel .wpe { flex: 1 1 auto; min-height: 0; min-width: 0; height: auto; }
+  #editor-panel .wpe-collapse { display: none; }
+  .wpe-tabs { position: sticky; top: 0; z-index: 1; }
+  .wpe-list { min-height: 0; }
+  .wpe-name, .wpe-sub { overflow-wrap: anywhere; min-width: 0; }
+  .wpe-item { min-width: 0; }
+  .sheet-handle {
+    display: flex; align-items: center; justify-content: center; flex: none;
+    height: 44px; touch-action: none; cursor: grab; background: #0a152b;
+  }
+  .sheet-grip { width: 44px; height: 5px; border-radius: 3px; background: #6a7a9a; }
 }
