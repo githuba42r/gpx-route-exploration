@@ -99,6 +99,13 @@ def test_library_cards_single_column(mobile_page, server_url):
     xs = {round(cards.nth(i).bounding_box()["x"]) for i in range(cards.count())}
     assert len(xs) == 1, f"cards not in one column: {xs}"
     assert_no_hscroll(mobile_page)
+    sw, cw = mobile_page.evaluate(
+        "[document.querySelector('#route-list').scrollWidth, document.querySelector('#route-list').clientWidth]"
+    )
+    assert sw <= cw, f"#route-list overflows: {sw} > {cw}"
+    vw = mobile_page.evaluate("window.innerWidth")
+    for i in range(cards.count()):
+        assert cards.nth(i).bounding_box()["x"] + cards.nth(i).bounding_box()["width"] <= vw + 0.5
 
 
 def _sidebar_in_viewport(page):

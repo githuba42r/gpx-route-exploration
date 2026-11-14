@@ -26,5 +26,4 @@
     background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
   }
   #drawer-scrim.is-open { opacity: 1; pointer-events: auto; }
-  #sidebar input[type="checkbox"], #sidebar input[type="radio"] { min-height: 0; min-width: 0; }
 }
