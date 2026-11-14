@@ -1,3 +1,5 @@
+import { onLongPress } from './long-press.js';
+
 // --- Leaflet marker factories for stops and waypoints ---
 //
 // Icons are HTML divIcons styled with CSS. Stop = red octagon,
@@ -64,6 +66,11 @@ export function renderMarkers(map, waypoints, existingLayers,
         if (e.originalEvent) e.originalEvent.preventDefault();
         onContextMenu(w, e);
       });
+      // Touch: long-press is the single path (native contextmenu is
+      // swallowed by onLongPress while a finger is down). Unsubscribe when
+      // the marker is removed so rebuilds don't leak listeners.
+      const unsub = onLongPress(marker, (e) => onContextMenu(w, e));
+      marker.once('remove', unsub);
     }
     if (onDragEnd) marker.on('dragend', (e) => {
       const { lat, lng } = e.target.getLatLng();

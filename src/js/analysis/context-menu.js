@@ -5,6 +5,7 @@ import { haversine } from './track-processor.js';
 import { storageKey } from './storage.js';
 import { showGradientModal, closeGradientModal } from './gradient-modal.js';
 import { initTerrainGradient } from './terrain-gradient.js';
+import { onLongPress } from '../shared/long-press.js';
 
 /**
  * Shared context-menu state passed to modal sub-modules.
@@ -165,14 +166,19 @@ export function initContextMenu(map, points, gradSectionsRef) {
     marker._wpLabel = label || '';
     marker.bindPopup(buildPopupContent(marker));
 
-    marker.on('contextmenu', (e) => {
-      L.DomEvent.stopPropagation(e);
+    const openMarkerMenu = (e) => {
       shared.ctxTargetWaypoint = marker;
       shared.ctxLatLng = e.latlng;
       shared.ctxNearestIdx = findNearestPoint(points, e.latlng);
       ctxRemoveWaypoint.style.display = '';
       showCtxMenu(e.originalEvent);
+    };
+    marker.on('contextmenu', (e) => {
+      L.DomEvent.stopPropagation(e);
+      openMarkerMenu(e);
     });
+    const unsubLongPress = onLongPress(marker, openMarkerMenu);
+    marker.once('remove', unsubLongPress);
 
     marker.on('dragend', () => {
       marker.setPopupContent(buildPopupContent(marker));
@@ -193,14 +199,19 @@ export function initContextMenu(map, points, gradSectionsRef) {
   }
 
   // --- Map right-click ---
-  map.on('contextmenu', (e) => {
-    L.DomEvent.preventDefault(e.originalEvent);
+  const openMapMenu = (e) => {
     shared.ctxLatLng = e.latlng;
     shared.ctxNearestIdx = findNearestPoint(points, e.latlng);
     shared.ctxTargetWaypoint = null;
     ctxRemoveWaypoint.style.display = 'none';
     showCtxMenu(e.originalEvent);
+  };
+  map.on('contextmenu', (e) => {
+    L.DomEvent.preventDefault(e.originalEvent);
+    openMapMenu(e);
   });
+  // Touch: long-press opens the same menu (see shared/long-press.js).
+  onLongPress(map, openMapMenu);
 
   document.addEventListener('click', hideCtxMenu);
   document.addEventListener('contextmenu', (e) => {

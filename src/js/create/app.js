@@ -15,6 +15,7 @@
 
 import { initCreateMap, fitToWaypoints } from './map.js';
 import { renderMarkers } from '../shared/waypoint-markers.js';
+import { onLongPress, longPressJustFired } from '../shared/long-press.js';
 import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
@@ -1279,7 +1280,11 @@ async function main() {
   // before the first reloadWaypoints() returns still get distinct default
   // names. Initialised to the current waypoint count on load.
   state.clickCounter = state.waypoints.length;
+  // A long-press on empty map has no menu in Create, but must not fall
+  // through to tap-to-add when the finger lifts (iOS fires no contextmenu).
+  onLongPress(state.map, () => {});
   state.map.on('click', async (e) => {
+    if (longPressJustFired()) return;  // click synthesised after a long-press
     const n = ++state.clickCounter;
     // Ctrl+click (or Cmd+click on macOS) drops a stop, plain click drops a
     // waypoint. Keeps single-click fast for route shaping and makes the

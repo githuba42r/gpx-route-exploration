@@ -4,6 +4,7 @@
     min-height: 44px;
   }
   button { min-width: 44px; }
+  #ctx-menu .ctx-item, #pin-ctx-menu button { min-height: 44px; box-sizing: border-box; }
   #main-nav { flex-wrap: wrap; height: auto; }
   #create-header, #settings-bar, #header, #stats { flex-wrap: wrap; }
   #create-header input, #settings-bar input, #header input, #stats input,

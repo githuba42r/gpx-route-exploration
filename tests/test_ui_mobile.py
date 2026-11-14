@@ -410,3 +410,136 @@ def test_desktop_collapsed_panel_does_not_break_sheet(mobile_page, server_url):
     mobile_page.click(".wpe-collapse")
     mobile_page.wait_for_timeout(400)
     assert abs(_box(mobile_page, "#editor-panel")["width"] - 340) <= 1
+
+
+# --- Task 4: touch interactions (tap-to-add, long-press context menu) ---
+
+def _touch_hold(page, x, y, ms=650, move_to=None):
+    """Press at (x, y), optionally drift to move_to, hold for ms, release."""
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent",
+             {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+    if move_to:
+        cdp.send("Input.dispatchTouchEvent",
+                 {"type": "touchMove", "touchPoints": [{"x": move_to[0], "y": move_to[1]}]})
+    page.wait_for_timeout(ms)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    cdp.detach()
+    page.wait_for_timeout(500)
+
+
+def _wp_count(server_url, rid):
+    return len(http_requests.get(f"{server_url}/api/routes/{rid}/waypoints").json())
+
+
+def _marker_center(page, idx=0):
+    b = page.locator(".wpe-marker").nth(idx).bounding_box()
+    return b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+
+
+def _empty_map_point(page):
+    """A map point away from markers/controls, above the collapsed sheet."""
+    b = _box(page, "#map")
+    return b["x"] + b["width"] - 60, b["y"] + 120
+
+
+def test_tap_adds_waypoint(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=1)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _empty_map_point(mobile_page)
+    _touch_hold(mobile_page, x, y, ms=40)
+    mobile_page.wait_for_timeout(500)
+    assert _wp_count(server_url, rid) == 2
+
+
+def test_long_press_marker_opens_context_menu(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=700)
+    menu = mobile_page.locator("#pin-ctx-menu")
+    assert menu.is_visible()
+    heights = mobile_page.eval_on_selector_all(
+        "#pin-ctx-menu button", "els => els.map(e => e.getBoundingClientRect().height)")
+    assert heights and min(heights) >= 44, heights
+    assert _wp_count(server_url, rid) == 2  # no tap-to-add fired
+
+
+def test_short_tap_marker_does_not_open_menu(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=60)
+    assert not mobile_page.locator("#pin-ctx-menu").is_visible()
+
+
+def test_long_press_cancelled_by_move(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=700, move_to=(x + 40, y + 40))
+    assert not mobile_page.locator("#pin-ctx-menu").is_visible()
+
+
+def test_long_press_marker_opens_menu_once(mobile_page, server_url):
+    """Menu is built exactly once per long-press (no double-open from a native contextmenu)."""
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    mobile_page.evaluate("""() => {
+        window.__menuBuilds = 0;
+        const m = document.getElementById('pin-ctx-menu');
+        new MutationObserver(() => { if (m.innerHTML) window.__menuBuilds++; })
+            .observe(m, {childList: true});
+    }""")
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=700)
+    assert mobile_page.evaluate("window.__menuBuilds") == 1
+
+
+def test_long_press_after_marker_rebuild_still_single(mobile_page, server_url):
+    """Markers are rebuilt on every redraw; handlers must not stack."""
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    mobile_page.evaluate("window.__appState.map.fire('click', {latlng: window.__appState.map.getCenter()})")
+    mobile_page.wait_for_timeout(1000)
+    mobile_page.evaluate("""() => {
+        window.__menuBuilds = 0;
+        const m = document.getElementById('pin-ctx-menu');
+        new MutationObserver(() => { if (m.innerHTML) window.__menuBuilds++; })
+            .observe(m, {childList: true});
+    }""")
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=700)
+    assert mobile_page.evaluate("window.__menuBuilds") == 1
+
+
+def _goto_analysis(page, server_url, rid):
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{server_url}/route/{rid}")
+    page.wait_for_selector("#map .leaflet-tile-container", state="attached")
+    # Analysis mobile layout is Task 5; give #map a usable height meanwhile.
+    page.add_style_tag(content="#map{height:300px!important;min-height:300px!important;flex:none!important}")
+    page.wait_for_timeout(800)
+
+
+def test_analysis_long_press_map_opens_menu_and_marker(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=0)
+    page = mobile_page
+    _goto_analysis(page, server_url, rid)
+    b = _box(page, "#map")
+    x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+    _touch_hold(page, x, y, ms=700)
+    assert page.locator("#ctx-menu").is_visible()
+    heights = page.eval_on_selector_all(
+        "#ctx-menu .ctx-item", "els => els.filter(e => e.offsetParent).map(e => e.getBoundingClientRect().height)")
+    assert heights and min(heights) >= 44, heights
+    page.once("dialog", lambda d: d.accept("L"))
+    page.locator("#ctx-add-waypoint").tap() if page.locator("#ctx-add-waypoint").count() else None
+    page.wait_for_timeout(500)
+    assert page.locator(".waypoint-icon").count() == 1
+    assert not page.locator("#ctx-menu").is_visible()
+    mb = page.locator(".waypoint-icon").bounding_box()
+    _touch_hold(page, mb["x"] + mb["width"] / 2, mb["y"] + mb["height"] / 2, ms=700)
+    assert page.locator("#ctx-menu").is_visible()
+    # remove-waypoint entry is shown only for marker menus
+    assert page.locator("#ctx-remove-waypoint").is_visible()
