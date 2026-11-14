@@ -85,3 +85,17 @@ def test_oversized_cell_raises_csv_import_error():
     text = "name,address\n" + "x" * 200_000 + ",a\n"
     with pytest.raises(CsvImportError, match="not a valid CSV"):
         p(text, {"address": "address"})
+
+
+def test_padded_header_with_padded_mapping_values():
+    rows = p("Name, Lat, Lon\nA,-27.5,153.0\n",
+             {"name": "Name", "lat": " Lat", "lon": " Lon"})
+    assert len(rows) == 1
+    assert rows[0]["lat"] == -27.5 and rows[0]["lon"] == 153.0
+    assert rows[0]["name"] == "A"
+
+
+def test_padded_header_with_unpadded_mapping_values():
+    rows = p("Name, Lat, Lon\nA,-27.5,153.0\n",
+             {"name": "Name", "lat": "Lat", "lon": "Lon"})
+    assert rows[0]["lat"] == -27.5 and rows[0]["lon"] == 153.0

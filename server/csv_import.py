@@ -55,6 +55,8 @@ def parse_csv(data: bytes, mapping: dict, *, max_rows: int) -> list:
 
     pos = {}
     for key, col in mapping.items():
+        if isinstance(col, str):
+            col = col.strip()
         if col not in header:
             raise CsvImportError(f"Column '{col}' not found in the CSV header")
         pos[key] = header.index(col)
