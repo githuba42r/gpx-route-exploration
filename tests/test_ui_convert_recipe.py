@@ -40,7 +40,7 @@ def test_convert_default_lands_on_create_with_six_rows(page, server_url):
     expect(page.locator("#convert-count")).to_have_value("6")
     assert "lossy" in page.locator("#convert-overlay").inner_text().lower()
     page.locator("#convert-confirm").click()
-    page.wait_for_url(f"**/create?route_id={rid}", timeout=10000)
+    page.wait_for_url(f"**/create?route_id={rid}*", timeout=10000)
     expect(page.locator(".wpe-item")).to_have_count(6, timeout=10000)
     page.goto(f"{server_url}/route/{rid}")
     expect(page.locator("a#btn-open-edit")).to_be_visible(timeout=10000)
@@ -53,7 +53,7 @@ def test_convert_custom_count(page, server_url):
     page.locator("#btn-convert-recipe").click()
     page.locator("#convert-count").fill("4")
     page.locator("#convert-confirm").click()
-    page.wait_for_url(f"**/create?route_id={rid}", timeout=10000)
+    page.wait_for_url(f"**/create?route_id={rid}*", timeout=10000)
     expect(page.locator(".wpe-item")).to_have_count(4, timeout=10000)
 
 
@@ -111,5 +111,50 @@ def test_double_activation_posts_once(page, server_url):
     page.wait_for_timeout(300)
     assert len(posts) == 1
     held[0].continue_()
-    page.wait_for_url(f"**/create?route_id={rid}", timeout=10000)
+    page.wait_for_url(f"**/create?route_id={rid}*", timeout=10000)
     assert len(posts) == 1
+
+
+AUTO_ON = "localStorage.setItem('gpx-create-auto-generate', '1')"
+
+
+def _count_generate(page):
+    calls = []
+
+    def handler(route):
+        calls.append(1)
+        route.fulfill(status=500, content_type="application/json", body='{"error": "x"}')
+
+    page.route("**/api/routes/*/generate", handler)
+    return calls
+
+
+def test_convert_does_not_auto_generate_on_arrival(page, server_url):
+    rid = _upload_sample(server_url)
+    original = http_requests.get(f"{server_url}/api/gpx/{rid}").content
+    page.add_init_script(AUTO_ON)
+    calls = _count_generate(page)
+    _open(page, server_url, rid)
+    page.locator("#btn-convert-recipe").click()
+    page.locator("#convert-confirm").click()
+    page.wait_for_url(f"**/create?route_id={rid}*", timeout=10000)
+    expect(page.locator(".wpe-item")).to_have_count(6, timeout=10000)
+    page.wait_for_timeout(1500)
+    assert calls == []
+    assert http_requests.get(f"{server_url}/api/gpx/{rid}").content == original
+    assert "converted" not in page.url
+
+
+def test_auto_generate_still_fires_on_a_normal_create_load(page, server_url):
+    rid = _upload_sample(server_url, title="normal")
+    http_requests.post(f"{server_url}/api/routes/{rid}/convert-to-recipe", json={"count": 4})
+    page.add_init_script(AUTO_ON)
+    calls = _count_generate(page)
+    page.goto(f"{server_url}/create?route_id={rid}")
+    expect(page.locator(".wpe-item")).to_have_count(4, timeout=10000)
+    page.wait_for_timeout(1500)
+    assert len(calls) >= 1
+
+
+# The pageshow/bfcache reload guard is not covered by a test: headless
+# Chromium under Playwright does not reliably enable bfcache.

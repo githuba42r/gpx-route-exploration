@@ -20,8 +20,9 @@ export function openConvertDialog(routeId) {
     <div class="convert-box" role="dialog" aria-modal="true" aria-labelledby="convert-title">
       <h3 id="convert-title" class="convert-title">Convert to recipe</h3>
       <p>Converting is lossy: the track is reduced to a small set of editable waypoints.
-        Creates N editable waypoints from this track. The track itself is not changed
-        until you regenerate it; the original file is kept as a backup.</p>
+        Creates N editable waypoints from this track. The track file is replaced the next
+        time you generate the route (this does not happen automatically after converting);
+        the original file is kept as a backup.</p>
       <label class="convert-row">Number of waypoints (N)
         <input type="number" id="convert-count" min="2" max="50" step="1" value="${esc(DEFAULT_COUNT)}">
       </label>
@@ -67,7 +68,10 @@ export function openConvertDialog(routeId) {
       try { data = await resp.json(); } catch (_) { /* non-JSON body */ }
       if (!resp.ok) throw new Error(data.error || `Conversion failed (${resp.status})`);
       // Success: navigate away; leave the busy state set.
-      window.location.href = `/create?route_id=${encodeURIComponent(routeId)}`;
+      const dest = new URL('/create', window.location.origin);
+      dest.searchParams.set('route_id', routeId);
+      dest.searchParams.set('converted', '1');
+      window.location.href = dest.pathname + dest.search;
     } catch (e) {
       errEl.textContent = e.message || 'Conversion failed';
       inFlight = false;
@@ -88,5 +92,7 @@ export function openConvertDialog(routeId) {
 export function initConvertRecipe() {
   const btn = document.getElementById('btn-convert-recipe');
   if (!btn) return;
+  // Back-from-bfcache must not restore the dialog stuck in its busy state.
+  window.addEventListener('pageshow', (e) => { if (e.persisted) window.location.reload(); });
   btn.addEventListener('click', () => openConvertDialog(document.body.dataset.routeId));
 }

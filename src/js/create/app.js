@@ -464,6 +464,15 @@ function isoToLocalInput(iso) {
 // on, leading-edge fires a fresh call right away.
 
 async function initialRouteDraw(state) {
+  // Arriving straight from "Convert to recipe": do not auto-generate on this
+  // first load (it would overwrite the uploaded track). Strip the flag so a
+  // later reload behaves normally.
+  const url = new URL(window.location.href);
+  const justConverted = url.searchParams.get('converted') === '1';
+  if (url.searchParams.has('converted')) {
+    url.searchParams.delete('converted');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }
   if (state.waypoints.length < 2) return;
   try {
     const resp = await fetch(`/api/routes/${state.routeId}/legs`);
@@ -477,7 +486,7 @@ async function initialRouteDraw(state) {
       }
     }
   } catch (_) { /* fall through */ }
-  if (state.autoGenerate) {
+  if (state.autoGenerate && !justConverted) {
     maybeFireGenerate(state);
     ensureRenderLoop(state);
   }

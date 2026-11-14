@@ -21,6 +21,7 @@ import { initNav } from './nav.js';
 import { initConvertRecipe } from './convert-recipe.js';
 
 async function main() {
+  initConvertRecipe();
   const { points, trackName } = await loadGPX();
 
   document.getElementById('track-name').textContent = trackName;
@@ -172,7 +173,6 @@ async function main() {
 
   // Nav (no-op for now)
   initNav();
-  initConvertRecipe();
   // Edit Route in the nav is now a plain anchor navigating to /create?route_id=<id>
   // (the Create page serves as the editor). No JS needed here.
 }
