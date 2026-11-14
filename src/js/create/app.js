@@ -598,6 +598,10 @@ function escapeHtml(s) {
 // enqueue for the next eligible moment.
 function maybeFireGenerate(state, { bypassCooldown = false } = {}) {
   if (state.waypoints.length < 2) return;
+  if (state.importing) {
+    state.pendingChange = true;   // picked up when the CSV import finishes
+    return;
+  }
   if (state.isGenerating) {
     state.pendingChange = true;   // picked up after the in-flight call lands
     return;
@@ -634,7 +638,7 @@ function startCooldown(state) {
     state.cooldownStartedAt = null;
     state.cooldownDeadline = null;
     // If a waypoint edit happened while we were cooling down, fire now.
-    if (state.pendingChange && state.autoGenerate && state.waypoints.length >= 2) {
+    if (state.pendingChange && state.autoGenerate && !state.importing && state.waypoints.length >= 2) {
       state.pendingChange = false;
       doGenerate(state);
     } else {
