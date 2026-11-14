@@ -1,3 +1,4 @@
+import { openCsvImport } from '../shared/csv-import.js';
 /**
  * Library page entry point.
  * Fetches data from API and wires up all UI components.
@@ -143,6 +144,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   const slot = $('#sidebar-new-route');
   if (slot) slot.appendChild(newRouteBtn);
+
+  const importCsvBtn = document.createElement('button');
+  importCsvBtn.id = 'btn-import-csv';
+  importCsvBtn.className = 'import-csv-btn';
+  importCsvBtn.style.marginTop = '6px';
+  importCsvBtn.textContent = '+ Import CSV';
+  importCsvBtn.addEventListener('click', () => {
+    openCsvImport({
+      onDone: ({ route_id }) => {
+        window.location.href = `/create?route_id=${route_id}`;
+      },
+    });
+  });
+  if (slot) slot.appendChild(importCsvBtn);
 
   try {
     await loadData();
