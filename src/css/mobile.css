@@ -1,0 +1,12 @@
+/* M7 mobile foundation: tap targets, wrapping bars, no horizontal scroll. */
+@media (max-width: 900px) {
+  button, select, input, .legend-item, .legend-btn, a.nav-brand, #btn-open-edit {
+    min-height: 44px;
+  }
+  button { min-width: 44px; }
+  #main-nav { flex-wrap: wrap; height: auto; }
+  #create-header, #settings-bar, #header, #stats { flex-wrap: wrap; }
+  #create-header input, #settings-bar input, #header input, #stats input,
+  #create-header select, #settings-bar select { max-width: 100%; }
+  #route-title { min-width: 0; width: 100%; }
+}
