@@ -977,3 +977,7 @@ git commit -m "refactor(routing): every waypoint is a break — one leg per adja
 
 - [ ] Append a `**M2 verified:**` line to the bottom of this plan.
 - [ ] Hand back to the user (do not merge — same pattern as M1).
+
+---
+
+**M2 verified:** 2026-11-14 by Claude Code, for review by Phil Gersekowski. Audited after the fact. `test_ui_edit_panel.py` and `test_ui_create.py` pass (95-test run with the M1 suites); per-leg routing and line-drag insertion (Tasks 6-7) are exercised by `test_ui_create.py` and by the M3 smoke script. The manual checklist was not walked by hand. Deviations from the spec: editing happens on `/create?route_id=<id>` via the Edit Route link, not a slide-out panel on the Analysis page (commit `a0696b9` replaced the inline panel), and every waypoint is a routing break, giving one leg per adjacent pair. GPX-only routes keep a disabled Edit button. Full-suite status is as recorded in the M3 sign-off.

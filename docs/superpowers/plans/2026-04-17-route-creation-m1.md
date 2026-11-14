@@ -2747,3 +2747,7 @@ git push origin main
 - [ ] **Step 8: Announce completion**
 
 Tell the user: **"M1 complete and merged to `main`. Ready to write the M2 plan (inline Edit panel on the Analysis page) — shall I proceed?"**
+
+---
+
+**M1 verified:** 2026-11-14 by Claude Code, for review by Phil Gersekowski. Audited after the fact against the spec's M1 acceptance list. `test_api_waypoints.py`, `test_api_routing.py`, `test_models_waypoints.py` and `test_ui_create.py` pass (part of a 95-test run with the M2 suites). Create, reorder, promote-to-stop, Generate and the analysis redirect are exercised by those suites and by the M3 smoke script against the live Valhalla. The manual checklist was not walked by hand. Deviation from the spec: the profile picker is no longer locked to `bicycle`, because M3 enabled it. Full-suite status is as recorded in the M3 sign-off (5 pre-existing environmental failures, 2 flakes).
