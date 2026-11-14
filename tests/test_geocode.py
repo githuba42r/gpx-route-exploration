@@ -108,3 +108,18 @@ def test_rate_limit_default_is_1000_ms(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(config)
+
+
+def test_csv_limit_defaults(monkeypatch):
+    import importlib
+    import server.config as config
+
+    monkeypatch.delenv("CSV_MAX_BYTES", raising=False)
+    monkeypatch.delenv("CSV_MAX_ROWS", raising=False)
+    try:
+        importlib.reload(config)
+        assert config.Config.CSV_MAX_BYTES == 1048576
+        assert config.Config.CSV_MAX_ROWS == 200
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
