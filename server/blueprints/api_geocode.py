@@ -5,6 +5,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 from server.auth import get_current_user
 from server.csv_import import CsvImportError, parse_csv
+from server.geocode_client import GeocodeError, geocode_search
 from server.csv_jobs import get_job, iter_events, start_job
 from server.models.categories import ensure_default_category, get_category
 from server.models.routes import create_recipe_route, get_route
@@ -83,3 +84,20 @@ def stream_csv(job_id):
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@bp.route("/search", methods=["GET"])
+def search():
+    get_current_user()
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify([])
+    try:
+        limit = int(request.args.get("limit", 5))
+    except ValueError:
+        limit = 5
+    limit = max(1, min(10, limit))
+    try:
+        return jsonify(geocode_search(q, limit))
+    except GeocodeError:
+        return _err("Address search is unavailable", 502)
