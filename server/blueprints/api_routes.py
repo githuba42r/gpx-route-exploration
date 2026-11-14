@@ -7,6 +7,7 @@ from server.auth import get_current_user
 from server.gpx_parser import parse_gpx
 from server.models.categories import ensure_default_category, get_category
 from server.models.routes import (
+    create_recipe_route,
     create_route,
     delete_route,
     get_route,
@@ -112,18 +113,7 @@ def _create_recipe_only(user_id, data):
     else:
         category = ensure_default_category(user_id)
 
-    storage_name = f"{uuid.uuid4().hex}.gpx"
-    filename = f"{title}.gpx"
-
-    route = create_route(
-        user_id=user_id,
-        category_id=category["id"],
-        filename=filename,
-        storage_name=storage_name,
-        title=title,
-    )
-    from server.models import waypoints as wp_model
-    wp_model.update_options(route["id"], profile=profile)
+    route = create_recipe_route(user_id, category, title, profile)
     return jsonify(route), 201
 
 

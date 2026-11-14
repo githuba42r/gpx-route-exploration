@@ -1,3 +1,5 @@
+import uuid
+
 from server.models import get_db
 from server.models.categories import get_category
 
@@ -117,3 +119,19 @@ def move_route(user_id, route_id, new_category_id):
     )
     db.commit()
     return get_route(user_id, route_id)
+
+
+def create_recipe_route(user_id, category, title, profile="bicycle"):
+    """Create a recipe-only route (no GPX file yet) with the given profile."""
+    from server.models import waypoints as wp_model
+
+    storage_name = f"{uuid.uuid4().hex}.gpx"
+    route = create_route(
+        user_id=user_id,
+        category_id=category["id"],
+        filename=f"{title}.gpx",
+        storage_name=storage_name,
+        title=title,
+    )
+    wp_model.update_options(route["id"], profile=profile)
+    return route

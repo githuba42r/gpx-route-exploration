@@ -222,3 +222,7 @@ The backup scheduler starts automatically with the Flask application. At each in
 | Yearly | `backups/yearly/` | Unlimited | — |
 
 Backup behaviour is controlled by the `BACKUP_*` environment variables. Set `BACKUP_ENABLED=false` to disable the scheduler entirely.
+
+## CSV Import
+
+CSV import jobs keep their progress in memory, so the app must run with exactly one gunicorn worker (the Dockerfile uses `--workers 1 --threads 8`). Do not scale to multiple workers.
