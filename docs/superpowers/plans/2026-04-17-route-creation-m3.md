@@ -3215,3 +3215,7 @@ pytest tests/test_route_postprocess.py tests/test_api_routing.py tests/test_rout
 And a manual Generate on a hilly route with `max_gradient_warn=5`.
 
 At that point every bullet in the spec's M3 acceptance list (spec lines 282–289) should be verifiably passing.
+
+---
+
+**M3 verified:** 2026-11-14 by Claude Code, for review by Phil Gersekowski. All three phases (M3a, M3b, M3c) landed. Manual smoke (the 8 checks in M3c-7 Step 2) was scripted with Playwright against `http://localhost:5050/` and the live Valhalla, and passed 8/8. Check 1 confirms the preset change reaches the API and Generate succeeds; it does not compare the route against the road preset. Full `pytest tests/`: 244 passed, 7 failed. 5 failures are pre-existing environmental ones, reproduced at pre-M3 commit `9b681c1` (`test_ui_analysis.py::test_analysis_page_loads_map` and four in `test_ui_library.py`). The other 2 (`test_ui_create.py::test_right_click_opens_pin_context_menu`, `::test_debounce_slider_and_number_stay_in_sync`) are flaky under full-suite load and pass in isolation. Merge to `main` is left to the user.
