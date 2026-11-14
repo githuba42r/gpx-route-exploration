@@ -14,11 +14,21 @@
 // a fired long-press is suppressed twice over: touchend is preventDefault'd,
 // and longPressJustFired() lets click handlers (map tap-to-add) bail out.
 
-const SUPPRESS_CLICK_MS = 600;
-let lastFiredAt = -Infinity;
+// Event-based, not time-from-fire: set at touchend of a fired long-press
+// (so a finger held past the threshold is still covered), cleared by the
+// next touchstart or ~400ms after touchend, so a deliberate later tap is
+// never swallowed.
+const SUPPRESS_CLICK_MS = 400;
+let justFired = false;
+let justFiredTimer = null;
+
+function clearJustFired() {
+  justFired = false;
+  if (justFiredTimer) { clearTimeout(justFiredTimer); justFiredTimer = null; }
+}
 
 export function longPressJustFired() {
-  return performance.now() - lastFiredAt < SUPPRESS_CLICK_MS;
+  return justFired;
 }
 
 function elementOf(target) {
@@ -47,6 +57,7 @@ export function onLongPress(target, handler, { ms = 500, moveTolerance = 10 } = 
 
   function onStart(e) {
     clear();
+    clearJustFired();
     fired = false;
     touching = true;
     // A marker nested in the map container sees the same touch bubble up;
@@ -58,7 +69,6 @@ export function onLongPress(target, handler, { ms = 500, moveTolerance = 10 } = 
     timer = setTimeout(() => {
       timer = null;
       fired = true;
-      lastFiredAt = performance.now();
       handler({
         latlng: toLatLng(target, t),
         originalEvent: {
@@ -77,7 +87,12 @@ export function onLongPress(target, handler, { ms = 500, moveTolerance = 10 } = 
 
   function onEnd(e) {
     clear();
-    if (fired && e.cancelable) e.preventDefault();  // no synthesised click
+    if (fired) {
+      if (e.cancelable) e.preventDefault();  // no synthesised click
+      clearJustFired();
+      justFired = true;
+      justFiredTimer = setTimeout(clearJustFired, SUPPRESS_CLICK_MS);
+    }
     if (e.touches.length === 0) touching = false;
   }
 

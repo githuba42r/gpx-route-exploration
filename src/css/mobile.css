@@ -4,6 +4,7 @@
     min-height: 44px;
   }
   button { min-width: 44px; }
+  .leaflet-container { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   #ctx-menu .ctx-item, #pin-ctx-menu button { min-height: 44px; box-sizing: border-box; }
   #main-nav { flex-wrap: wrap; height: auto; }
   #create-header, #settings-bar, #header, #stats { flex-wrap: wrap; }

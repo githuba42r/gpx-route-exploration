@@ -543,3 +543,34 @@ def test_analysis_long_press_map_opens_menu_and_marker(mobile_page, server_url):
     assert page.locator("#ctx-menu").is_visible()
     # remove-waypoint entry is shown only for marker menus
     assert page.locator("#ctx-remove-waypoint").is_visible()
+
+
+def test_long_press_empty_map_does_not_add_waypoint(mobile_page, server_url):
+    """Plan key risk: the click after a long-press must not trigger tap-to-add."""
+    rid = make_route(server_url, n_waypoints=1)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _empty_map_point(mobile_page)
+    # Chromium suppresses the post-long-press click itself; iOS Safari does
+    # not. Emulate iOS by dispatching the synthesised click right after
+    # touchend so the guard (not the browser) is what is under test.
+    cdp = mobile_page.context.new_cdp_session(mobile_page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+    mobile_page.wait_for_timeout(700)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    cdp.detach()
+    mobile_page.evaluate("""([x, y]) => document.elementFromPoint(x, y).dispatchEvent(
+        new MouseEvent('click', {bubbles: true, cancelable: true, clientX: x, clientY: y}))""", [x, y])
+    mobile_page.wait_for_timeout(600)
+    assert _wp_count(server_url, rid) == 1
+    assert not mobile_page.locator("#pin-ctx-menu").is_visible()  # no map menu in Create
+
+
+def test_tap_after_long_press_still_adds_waypoint(mobile_page, server_url):
+    rid = make_route(server_url, n_waypoints=1)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _empty_map_point(mobile_page)
+    _touch_hold(mobile_page, x, y, ms=700)
+    mobile_page.wait_for_timeout(800)
+    _touch_hold(mobile_page, x, y, ms=40)
+    mobile_page.wait_for_timeout(500)
+    assert _wp_count(server_url, rid) == 2
