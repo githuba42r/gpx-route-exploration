@@ -64,6 +64,7 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
   let file = null;
   let source = null;
   let busy = false;
+  let jobStarted = false;
   let rowCount = 0;
 
   function close() {
@@ -82,7 +83,7 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
 
   function refreshStart() {
     const m = currentMapping();
-    const ok = !busy && file && (m.address || (m.lat && m.lon));
+    const ok = !busy && !jobStarted && file && (m.address || (m.lat && m.lon));
     $('#csv-import-start').disabled = !ok;
   }
 
@@ -119,6 +120,7 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
   });
 
   $('#csv-import-start').addEventListener('click', async () => {
+    if (jobStarted || busy) return;
     const errEl = $('#csv-import-error');
     errEl.textContent = '';
     busy = true;
@@ -140,6 +142,7 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
       refreshStart();
       return;
     }
+    jobStarted = true;
     onStart(data);
     $('#csv-progress-wrap').hidden = false;
     const prog = $('#csv-progress');

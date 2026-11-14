@@ -77,5 +77,6 @@ def test_stream_failure_shows_recovery_link(page, server_url, tmp_path):
     link = page.locator("#csv-import-open-route")
     expect(link).to_be_visible()
     assert re.search(r"/create\?route_id=\d+$", link.get_attribute("href"))
+    expect(page.locator("#csv-import-start")).to_be_disabled()
     page.locator("#csv-import-close").click()
     expect(page.locator("#csv-import-overlay")).to_have_count(0)
