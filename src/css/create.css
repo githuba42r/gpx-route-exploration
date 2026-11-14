@@ -146,6 +146,7 @@
  * aside pops out of the flex flow and floats as a small tab on the right
  * edge of the map, letting the map expand into the freed width. Clicking
  * the ◀ expand arrow restores the sidebar. */
+@media (min-width: 901px) {
 #editor-panel.collapsed {
   position: absolute !important;
   right: 0 !important;
@@ -181,6 +182,7 @@
   color: #333;
   background: transparent;
   line-height: 1;
+}
 }
 
 /* ---------- Line-drag: grab the generated route to insert a waypoint ---------- */

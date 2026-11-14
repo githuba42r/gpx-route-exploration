@@ -64,4 +64,9 @@
     height: 44px; touch-action: none; cursor: grab; background: #0a152b;
   }
   .sheet-grip { width: 44px; height: 5px; border-radius: 3px; background: #6a7a9a; }
+  /* A desktop-collapsed panel must not break the sheet (state is kept for desktop). */
+  #editor-panel.wpe-collapsed { width: 100% !important; }
+  #editor-panel.wpe-collapsed .wpe-head strong { display: inline; }
+  #editor-panel.wpe-collapsed .wpe-tabs, #editor-panel.wpe-collapsed .wpe-totals { display: flex; }
+  #editor-panel.wpe-collapsed .wpe-list { display: block; }
 }

@@ -382,3 +382,31 @@ def test_csv_import_dialog_fits_at_360(mobile_page, server_url):
     for sel in ("#csv-import-close", "#csv-import-start"):
         assert mobile_page.locator(sel).is_visible()
         _assert_inside_viewport(mobile_page, sel)
+
+
+def test_desktop_collapsed_panel_does_not_break_sheet(mobile_page, server_url):
+    _goto_create(mobile_page, server_url, w=1280, h=900)
+    mobile_page.click(".wpe-collapse")
+    mobile_page.wait_for_timeout(400)
+    assert "collapsed" in mobile_page.get_attribute("#editor-panel", "class")
+    assert _box(mobile_page, "#editor-panel")["width"] < 60
+    mobile_page.set_viewport_size({"width": 390, "height": 844})
+    mobile_page.wait_for_timeout(600)
+    assert _sheet(mobile_page) == "half"
+    p = _box(mobile_page, "#editor-panel")
+    assert abs(p["width"] - 390) <= 1 and p["height"] > 150, p
+    assert mobile_page.locator(".sheet-handle").is_visible()
+    assert _box(mobile_page, ".sheet-handle")["height"] >= 44
+    assert mobile_page.locator(".wpe-tabs").is_visible()
+    assert mobile_page.locator(".wpe-totals").is_visible()
+    x, y = _handle_center(mobile_page)
+    _mouse_drag(mobile_page, x, y, x, y - 250)
+    assert _sheet(mobile_page) == "full"
+    mobile_page.set_viewport_size({"width": 1280, "height": 900})
+    mobile_page.wait_for_timeout(600)
+    assert _sheet(mobile_page) is None
+    assert "collapsed" in mobile_page.get_attribute("#editor-panel", "class")
+    assert _box(mobile_page, "#editor-panel")["width"] < 60
+    mobile_page.click(".wpe-collapse")
+    mobile_page.wait_for_timeout(400)
+    assert abs(_box(mobile_page, "#editor-panel")["width"] - 340) <= 1
