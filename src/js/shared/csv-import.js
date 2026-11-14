@@ -144,15 +144,16 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
     $('#csv-progress-wrap').hidden = false;
     const prog = $('#csv-progress');
     const text = $('#csv-progress-text');
-    let seen = 0;
+    const rows = new Map(); // index -> status; idempotent under SSE replay
     prog.max = Math.max(rowCount, 1);
     text.textContent = `0 of ${rowCount}`;
     source = new EventSource(`/api/geocode/csv/${data.job_id}/stream`);
     source.addEventListener('row', (ev) => {
-      seen += 1;
-      let total = prog.max;
-      try { total = JSON.parse(ev.data).total || total; } catch (_) { /* ignore */ }
-      prog.max = Math.max(total, seen);
+      let row;
+      try { row = JSON.parse(ev.data); } catch (_) { return; }
+      rows.set(row.index ?? rows.size, row.status);
+      const seen = rows.size;
+      prog.max = Math.max(rowCount, seen, 1);
       prog.value = seen;
       text.textContent = `${seen} of ${prog.max}`;
     });
@@ -168,8 +169,32 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
       if (onDone) onDone(summary);
     });
     source.onerror = () => {
-      if (source && source.readyState === EventSource.CLOSED) {
-        errEl.textContent = 'Lost connection to import progress stream.';
+      if (!source || source.readyState !== EventSource.CLOSED) return;
+      source.close();
+      source = null;
+      busy = false;
+      refreshStart();
+      const failed = [...rows.values()].filter((st) => st === 'failed').length;
+      errEl.textContent = 'The connection to the import progress stream was lost. '
+        + 'The import may already have completed on the server. ';
+      const rid = data.route_id;
+      if (routeId) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'csv-import-refresh';
+        btn.className = 'csv-btn';
+        btn.textContent = 'Refresh';
+        btn.addEventListener('click', () => {
+          close();
+          if (onDone) onDone({ route_id: rid, total: rows.size, failed, appended: rows.size - failed });
+        });
+        errEl.appendChild(btn);
+      } else {
+        const link = document.createElement('a');
+        link.id = 'csv-import-open-route';
+        link.href = `/create?route_id=${encodeURIComponent(rid)}`;
+        link.textContent = 'Open the route';
+        errEl.appendChild(link);
       }
     };
   });

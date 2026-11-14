@@ -56,5 +56,26 @@ def test_server_rejection_is_shown_in_the_dialog(page, server_url, tmp_path):
     page.locator("#btn-import-csv").click()
     page.set_input_files("#csv-file-input", path)
     page.locator("#csv-import-start").click()
-    expect(page.locator("#csv-import-error")).not_to_be_empty()
+    expect(page.locator("#csv-import-error")).to_have_text(
+        "The CSV file has a header but no data rows"
+    )
     expect(page.locator("#csv-import-overlay")).to_be_visible()
+
+
+def test_stream_failure_shows_recovery_link(page, server_url, tmp_path):
+    path = _write_csv(tmp_path, "Name,Lat,Lon\nA,51.50,-0.10\nB,51.51,-0.11\n")
+    page.route(
+        "**/api/geocode/csv/*/stream",
+        lambda route: route.fulfill(status=500, body="x"),
+    )
+    page.goto(server_url)
+    page.locator("#btn-import-csv").click()
+    page.set_input_files("#csv-file-input", path)
+    page.locator("#csv-import-start").click()
+    expect(page.locator("#csv-import-error")).to_be_visible()
+    expect(page.locator("#csv-import-error")).to_contain_text("connection")
+    link = page.locator("#csv-import-open-route")
+    expect(link).to_be_visible()
+    assert re.search(r"/create\?route_id=\d+$", link.get_attribute("href"))
+    page.locator("#csv-import-close").click()
+    expect(page.locator("#csv-import-overlay")).to_have_count(0)
