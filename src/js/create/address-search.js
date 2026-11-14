@@ -10,6 +10,7 @@ export function initAddressSearch({ input, list, status, onSelect }) {
   let controller = null;
   let results = [];
   let active = -1;
+  let adding = false;
 
   function setStatus(text) { status.textContent = text || ''; }
 
@@ -51,8 +52,11 @@ export function initAddressSearch({ input, list, status, onSelect }) {
   }
 
   async function choose(idx) {
+    if (adding) return;
     const it = results[idx];
     if (!it) return;
+    adding = true;
+    input.readOnly = true;
     const name = String(it.display_name).split(',')[0].trim() || it.display_name;
     cancelPending();
     try {
@@ -66,6 +70,9 @@ export function initAddressSearch({ input, list, status, onSelect }) {
       // Keep the query and suggestions so the user can retry.
       setStatus('Could not add stop');
       return;
+    } finally {
+      adding = false;
+      input.readOnly = false;
     }
     clear();
     setStatus('');

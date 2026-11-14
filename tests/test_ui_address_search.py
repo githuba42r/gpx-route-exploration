@@ -188,9 +188,43 @@ def test_failed_add_keeps_the_query_and_shows_a_message(page, server_url):
     inp = page.locator("#add-address")
     inp.fill("Queen Street")
     expect(page.locator("#address-suggestions li")).to_have_count(3)
+    rows_before = page.locator(".wpe-item").count()
     page.locator("#address-suggestions li").nth(0).click()
     expect(page.locator("#address-status")).to_contain_text("Could not add stop")
     expect(inp).to_have_value("Queen Street")
     expect(page.locator("#address-suggestions li")).to_have_count(3)
-    expect(page.locator(".wpe-item")).to_have_count(0)
+    expect(page.locator(".wpe-item")).to_have_count(rows_before)
     expect(page.locator("#address-bar")).not_to_have_class(re.compile(r"is-busy"))
+
+
+def test_double_selection_adds_only_one_stop(page, server_url):
+    page.route("**/api/geocode/search*", lambda r: _fulfil(r, RESULTS))
+    posts = []
+
+    def wp_handler(route):
+        if route.request.method == "POST":
+            posts.append(route)  # held until the test releases it
+        else:
+            route.continue_()
+
+    page.route("**/api/routes/*/waypoints", wp_handler)
+    _open(page, server_url)
+    inp = page.locator("#add-address")
+    inp.fill("Queen Street")
+    items = page.locator("#address-suggestions li")
+    expect(items).to_have_count(3)
+    items.nth(0).click()
+    items.nth(0).click()
+    items.nth(1).click()
+    inp.press("Enter")
+    page.wait_for_timeout(500)
+    assert len(posts) == 1
+    posts[0].continue_()
+    page.wait_for_function(
+        "() => document.querySelectorAll('.wpe-item').length === 1", timeout=5000)
+    page.wait_for_timeout(500)
+    assert len(posts) == 1
+    expect(page.locator(".wpe-item")).to_have_count(1)
+    wps = http_requests.get(
+        f"{server_url}/api/routes/{_route_id(page)}/waypoints").json()
+    assert len(wps) == 1
