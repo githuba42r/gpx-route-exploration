@@ -188,18 +188,62 @@ def test_escape_closes_the_import_dialog(page, server_url):
     expect(page.locator("#csv-import-overlay")).to_have_count(0)
 
 
+_COUNT_KEYDOWN_JS = """
+(() => {
+  const live = new Set();
+  const key = (t, l, c) => t + '|' + (c === true || (c && c.capture) ? 1 : 0);
+  const handlers = new Map();
+  const add = document.addEventListener.bind(document);
+  const rem = document.removeEventListener.bind(document);
+  document.addEventListener = (t, l, c) => {
+    if (t === 'keydown' && l) {
+      const k = key(t, l, c);
+      if (!handlers.has(l)) handlers.set(l, new Set());
+      handlers.get(l).add(k);
+      live.add(l);
+    }
+    return add(t, l, c);
+  };
+  document.removeEventListener = (t, l, c) => {
+    if (t === 'keydown' && l) live.delete(l);
+    return rem(t, l, c);
+  };
+  window.__keydownCount = () => live.size;
+})();
+"""
+
+
 def test_escape_listener_does_not_stack(page, server_url):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.add_init_script(_COUNT_KEYDOWN_JS)
     page.goto(server_url)
-    for _ in range(3):
-        page.locator("#btn-import-csv").click()
-        page.locator("#csv-import-close").click()
-        expect(page.locator("#csv-import-overlay")).to_have_count(0)
-    # reopening without closing must also not leak a listener
+    count = lambda: page.evaluate("window.__keydownCount()")  # noqa: E731
+    base = count()
+
     page.locator("#btn-import-csv").click()
+    assert count() == base + 1
+
+    # three open/close cycles, alternating Cancel and Escape, return to baseline
+    page.locator("#csv-import-close").click()
+    assert count() == base
+    for closer in ("escape", "cancel", "escape"):
+        page.locator("#btn-import-csv").click()
+        assert count() == base + 1
+        if closer == "escape":
+            page.keyboard.press("Escape")
+        else:
+            page.locator("#csv-import-close").click()
+        expect(page.locator("#csv-import-overlay")).to_have_count(0)
+        assert count() == base
+
+    # a real re-open while the dialog is open replaces it without leaking
+    page.locator("#btn-import-csv").click()
+    page.evaluate("document.getElementById('btn-import-csv').click()")
+    assert count() == base + 1
+    expect(page.locator("#csv-import-overlay")).to_have_count(1)
     page.keyboard.press("Escape")
     expect(page.locator("#csv-import-overlay")).to_have_count(0)
-    page.keyboard.press("Escape")
+    assert count() == base
     page.keyboard.press("Escape")
     assert errors == []
