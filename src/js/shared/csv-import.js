@@ -31,7 +31,10 @@ function esc(s) {
   return d.innerHTML;
 }
 
+let closeActiveDialog = null;
+
 export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () => {}, onDone } = {}) {
+  if (closeActiveDialog) closeActiveDialog();
   document.getElementById('csv-import-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.id = 'csv-import-overlay';
@@ -69,8 +72,16 @@ export function openCsvImport({ routeId = null, defaultTitle = '', onStart = () 
 
   function close() {
     if (source) { source.close(); source = null; }
+    document.removeEventListener('keydown', onKeydown);
+    if (closeActiveDialog === close) closeActiveDialog = null;
     overlay.remove();
   }
+
+  function onKeydown(e) {
+    if (e.key === 'Escape' && overlay.isConnected) close();
+  }
+  document.addEventListener('keydown', onKeydown);
+  closeActiveDialog = close;
 
   function currentMapping() {
     const m = {};

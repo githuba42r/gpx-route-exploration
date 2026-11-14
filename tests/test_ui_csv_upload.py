@@ -178,3 +178,28 @@ def test_append_stream_failure_refresh_reloads_editor(page, server_url, tmp_path
     expect(page.locator("#csv-import-overlay")).to_have_count(0)
     expect(page.locator(".wpe-item")).to_have_count(3, timeout=20000)
     expect(page.locator("#btn-gen-primary")).to_be_enabled()
+
+
+def test_escape_closes_the_import_dialog(page, server_url):
+    page.goto(server_url)
+    page.locator("#btn-import-csv").click()
+    expect(page.locator("#csv-import-overlay")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("#csv-import-overlay")).to_have_count(0)
+
+
+def test_escape_listener_does_not_stack(page, server_url):
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server_url)
+    for _ in range(3):
+        page.locator("#btn-import-csv").click()
+        page.locator("#csv-import-close").click()
+        expect(page.locator("#csv-import-overlay")).to_have_count(0)
+    # reopening without closing must also not leak a listener
+    page.locator("#btn-import-csv").click()
+    page.keyboard.press("Escape")
+    expect(page.locator("#csv-import-overlay")).to_have_count(0)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    assert errors == []
