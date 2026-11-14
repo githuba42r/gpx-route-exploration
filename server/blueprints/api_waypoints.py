@@ -1,6 +1,8 @@
 """REST endpoints for a route's waypoint recipe."""
 
-from flask import Blueprint, jsonify, request
+import os
+
+from flask import Blueprint, current_app, jsonify, request
 
 from server.auth import get_current_user
 from server.models.routes import get_route
@@ -118,3 +120,43 @@ def reorder_waypoints(route_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(wp_model.list_waypoints(route_id)), 200
+
+
+@bp.route("/routes/<int:route_id>/convert-to-recipe", methods=["POST"])
+def convert_to_recipe(route_id):
+    """Turn a GPX-only route into a recipe by sampling its track."""
+    route, err = _require_route(route_id)
+    if err:
+        return err
+    if wp_model.list_waypoints(route_id):
+        return jsonify({"error": "Route already has a recipe"}), 409
+
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    count = data.get("count", 6)
+    if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= 50:
+        return jsonify({"error": "count must be an integer between 2 and 50"}), 400
+
+    from server.blueprints.api_gpx import _find_gpx_file
+    from server.gpx_recipe import extract_waypoints
+
+    path = _find_gpx_file(
+        current_app.config["DATA_DIR"], get_current_user(), route["storage_name"],
+    )
+    if path is None or not os.path.exists(path):
+        return jsonify({"error": "Route has no GPX file"}), 404
+    with open(path, "rb") as f:
+        gpx_bytes = f.read()
+    try:
+        points = extract_waypoints(gpx_bytes, count)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    for p in points:
+        wp_model.append_waypoint(
+            route_id, name=p["name"], lat=p["lat"], lon=p["lon"],
+            kind="waypoint", included=1,
+        )
+    wp_model.get_or_create_options(route_id)
+    rows = wp_model.list_waypoints(route_id)
+    return jsonify({"route_id": route_id, "count": len(rows), "waypoints": rows}), 200
