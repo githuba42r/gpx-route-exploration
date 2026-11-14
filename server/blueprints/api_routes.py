@@ -181,6 +181,8 @@ def delete_single_route(route_id):
     file_path = _find_gpx_file(data_dir, user_id, route["storage_name"])
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
+    if file_path and os.path.exists(file_path + ".orig"):
+        os.remove(file_path + ".orig")
 
     return "", 204
 
@@ -209,6 +211,8 @@ def move_route_endpoint(route_id):
         os.makedirs(new_dir, exist_ok=True)
         new_file_path = os.path.join(new_dir, route["storage_name"])
         os.rename(old_file_path, new_file_path)
+        if os.path.exists(old_file_path + ".orig"):
+            os.rename(old_file_path + ".orig", new_file_path + ".orig")
 
     try:
         updated = move_route(user_id, route_id, int(new_category_id))

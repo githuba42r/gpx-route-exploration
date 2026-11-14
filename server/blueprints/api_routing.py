@@ -2,6 +2,7 @@
 
 import json as _json
 import os
+import shutil
 import time
 
 from flask import Blueprint, current_app, jsonify, request
@@ -126,9 +127,15 @@ def generate_route(route_id):
         )
 
     wp_model.replace_legs(route_id, legs_rows)
+    never_generated = opts.get("last_generated_at") is None
     wp_model.update_options(route_id, last_generated_at=int(time.time()))
 
     gpx_path = _resolve_gpx_path(current_app, user_id, route)
+    # Keep a one-time backup of an uploaded file before the first generate
+    # overwrites it.
+    if (never_generated and os.path.exists(gpx_path)
+            and not os.path.exists(gpx_path + ".orig")):
+        shutil.copy2(gpx_path, gpx_path + ".orig")
     write_track_gpx(gpx_path, title=route["title"], legs=parsed_legs,
         waypoints=[
             {

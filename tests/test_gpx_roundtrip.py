@@ -271,3 +271,70 @@ def test_roundtrip_recipe_survives_export_and_reimport(client):
     original = norm(rid)
     assert len(original) == 5
     assert norm(new_id) == original
+
+
+# --- One-time backup of an uploaded GPX before first generate ---------------
+
+def _gen(client, rid):
+    with patch("server.routing.valhalla_client.requests.post") as mock_post:
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = _one_leg_valhalla_response()
+        mock_post.return_value.raise_for_status = lambda: None
+        return client.post(f"/api/routes/{rid}/generate")
+
+
+def _gpx_files(app):
+    out = []
+    for root_dir, _, files in os.walk(os.path.join(app.config["DATA_DIR"], "gpx")):
+        out += [os.path.join(root_dir, f) for f in files]
+    return sorted(out)
+
+
+def _uploaded_with_recipe(client):
+    with open("tests/fixtures/sample.gpx", "rb") as f:
+        original = f.read()
+    data = original.replace(
+        b"</gpx>", b'<wpt lat="-27.4" lon="152.9"><name>W</name></wpt></gpx>')
+    rid = _upload(client, data).get_json()["id"]
+    client.post(f"/api/routes/{rid}/waypoints",
+                json={"name": "X", "lat": -27.42, "lon": 152.92, "kind": "stop"})
+    return rid, data
+
+
+def test_first_generate_backs_up_uploaded_file(client, app):
+    rid, original = _uploaded_with_recipe(client)
+    assert _gen(client, rid).status_code == 200
+    files = _gpx_files(app)
+    origs = [p for p in files if p.endswith(".orig")]
+    assert len(origs) == 1
+    with open(origs[0], "rb") as f:
+        assert f.read() == original
+    exp = client.get(f"/api/routes/{rid}/export.gpx")
+    assert exp.data != original
+    assert b"<wpt" in exp.data and b"<trk>" in exp.data
+
+
+def test_second_generate_keeps_orig_unchanged(client, app):
+    rid, original = _uploaded_with_recipe(client)
+    _gen(client, rid)
+    assert _gen(client, rid).status_code == 200
+    origs = [p for p in _gpx_files(app) if p.endswith(".orig")]
+    assert len(origs) == 1
+    with open(origs[0], "rb") as f:
+        assert f.read() == original
+
+
+def test_delete_route_removes_orig_too(client, app):
+    rid, _ = _uploaded_with_recipe(client)
+    _gen(client, rid)
+    assert client.delete(f"/api/routes/{rid}").status_code == 204
+    assert _gpx_files(app) == []
+
+
+def test_recipe_only_route_leaves_no_orig(client, app):
+    rid = client.post("/api/routes", json={"title": "Rec", "profile": "bicycle"}).get_json()["id"]
+    for name, lat, lon in [("A", -27.40, 152.90), ("B", -27.42, 152.92)]:
+        client.post(f"/api/routes/{rid}/waypoints",
+                    json={"name": name, "lat": lat, "lon": lon, "kind": "stop"})
+    assert _gen(client, rid).status_code == 200
+    assert not [p for p in _gpx_files(app) if p.endswith(".orig")]
