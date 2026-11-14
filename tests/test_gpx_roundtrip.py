@@ -1,5 +1,6 @@
 """Round-trip tests for rich GPX export/import (M4)."""
 
+import io
 import os
 from unittest.mock import patch
 
@@ -154,3 +155,53 @@ def test_parse_wpt_bad_coordinates_skipped():
 def test_parse_without_wpt_returns_empty_list():
     with open("tests/fixtures/sample.gpx", "rb") as f:
         assert parse_gpx(f.read())["waypoints"] == []
+
+
+# --- Upload: recipe from <wpt> ---------------------------------------------
+
+def _upload(client, data: bytes):
+    return client.post(
+        "/api/routes",
+        data={"file": (io.BytesIO(data), "r.gpx"), "title": "T"},
+        content_type="multipart/form-data",
+    )
+
+
+def test_upload_with_wpt_creates_recipe(client):
+    data = _gpx_with(
+        '<wpt lat="-27.4" lon="152.9"><name>A</name><type>stop</type></wpt>'
+        '<wpt lat="-27.41" lon="152.91"><name>B</name><type>waypoint</type></wpt>'
+        '<wpt lat="-27.42" lon="152.92"><name>C</name></wpt>'
+    )
+    resp = _upload(client, data)
+    assert resp.status_code == 201
+    rid = resp.get_json()["id"]
+    wps = client.get(f"/api/routes/{rid}/waypoints").get_json()
+    if isinstance(wps, dict):
+        wps = wps.get("waypoints", wps)
+    assert [w["kind"] for w in wps] == ["stop", "waypoint", "waypoint"]
+    assert [w["position"] for w in wps] == [0, 1, 2]
+    assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is True
+
+
+def test_upload_without_wpt_has_no_recipe(client):
+    with open("tests/fixtures/sample.gpx", "rb") as f:
+        resp = _upload(client, f.read())
+    assert resp.status_code == 201
+    rid = resp.get_json()["id"]
+    wps = client.get(f"/api/routes/{rid}/waypoints").get_json()
+    if isinstance(wps, dict):
+        wps = wps.get("waypoints", wps)
+    assert wps == []
+    assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is False
+
+
+def test_upload_with_only_bad_wpt_still_succeeds(client):
+    data = _gpx_with(
+        '<wpt lat="abc" lon="2"><name>x</name></wpt>'
+        '<wpt lat="91" lon="2"><name>y</name></wpt>'
+    )
+    resp = _upload(client, data)
+    assert resp.status_code == 201
+    rid = resp.get_json()["id"]
+    assert client.get(f"/api/routes/{rid}").get_json()["has_recipe"] is False

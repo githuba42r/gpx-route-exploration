@@ -80,6 +80,19 @@ def upload_route():
         max_gradient_desc=stats.get("max_gradient_desc"),
         point_count=stats.get("point_count"),
     )
+    parsed_wps = stats.get("waypoints") or []
+    if parsed_wps:
+        from server.models import waypoints as wp_model
+        for wp in parsed_wps:
+            wp_model.append_waypoint(
+                route["id"],
+                name=wp["name"],
+                lat=wp["lat"],
+                lon=wp["lon"],
+                kind=wp["kind"],
+                description=wp.get("description"),
+            )
+        wp_model.get_or_create_options(route["id"])
     return jsonify(route), 201
 
 
