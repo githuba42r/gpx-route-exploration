@@ -15,7 +15,7 @@ def mobile_page(playwright, server_url):
     browser.close()
 
 
-def make_route(server_url, n_waypoints=3):
+def make_route(server_url, n_waypoints=3, title="Mobile test"):
     """Create a route with a GPX file on disk AND a recipe."""
     gpx = (
         b'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">'
@@ -29,7 +29,7 @@ def make_route(server_url, n_waypoints=3):
     r = http_requests.post(
         f"{server_url}/api/routes",
         files={"file": ("route.gpx", gpx)},
-        data={"title": "Mobile test"},
+        data={"title": title},
     )
     rid = r.json()["id"]
     for i in range(n_waypoints):
@@ -83,3 +83,65 @@ def test_tap_targets_min_44(mobile_page, server_url):
         if box and box["height"] < 44:
             small.append((el.evaluate("e => e.id || e.textContent"), box["height"]))
     assert not small, f"tap targets under 44px: {small}"
+
+
+LONG_TITLE = "A" * 80 + " " + "B" * 60
+
+
+def test_library_cards_single_column(mobile_page, server_url):
+    for _ in range(3):
+        make_route(server_url, title=LONG_TITLE)
+    mobile_page.set_viewport_size({"width": 390, "height": 800})
+    mobile_page.goto(f"{server_url}/")
+    mobile_page.wait_for_selector(".route-card")
+    cards = mobile_page.locator(".route-card")
+    assert cards.count() >= 3
+    xs = {round(cards.nth(i).bounding_box()["x"]) for i in range(cards.count())}
+    assert len(xs) == 1, f"cards not in one column: {xs}"
+    assert_no_hscroll(mobile_page)
+
+
+def _sidebar_in_viewport(page):
+    return page.evaluate(
+        "(() => { const r = document.querySelector('#sidebar').getBoundingClientRect();"
+        " return r.right > 0 && r.left < window.innerWidth; })()"
+    )
+
+
+def test_library_filter_drawer_opens_and_closes(mobile_page, server_url):
+    mobile_page.set_viewport_size({"width": 390, "height": 800})
+    mobile_page.goto(f"{server_url}/")
+    mobile_page.wait_for_selector("#btn-filters")
+    assert not _sidebar_in_viewport(mobile_page)
+    mobile_page.tap("#btn-filters")
+    mobile_page.wait_for_timeout(400)
+    assert _sidebar_in_viewport(mobile_page)
+    assert mobile_page.locator("#category-panel").is_visible()  # tag cloud is empty without tags
+    mobile_page.tap("#drawer-scrim", position={"x": 370, "y": 400})
+    mobile_page.wait_for_timeout(400)
+    assert not _sidebar_in_viewport(mobile_page)
+    # Escape also closes
+    mobile_page.tap("#btn-filters")
+    mobile_page.wait_for_timeout(400)
+    assert _sidebar_in_viewport(mobile_page)
+    mobile_page.keyboard.press("Escape")
+    mobile_page.wait_for_timeout(400)
+    assert not _sidebar_in_viewport(mobile_page)
+
+
+def test_library_drawer_resets_on_resize(mobile_page, server_url):
+    mobile_page.set_viewport_size({"width": 390, "height": 800})
+    mobile_page.goto(f"{server_url}/")
+    mobile_page.wait_for_selector("#btn-filters")
+    mobile_page.tap("#btn-filters")
+    mobile_page.wait_for_timeout(400)
+    mobile_page.set_viewport_size({"width": 1280, "height": 800})
+    mobile_page.wait_for_timeout(400)
+    pos = mobile_page.evaluate(
+        "(() => { const s = getComputedStyle(document.querySelector('#sidebar'));"
+        " return [s.position, document.querySelector('#sidebar').classList.contains('is-open')]; })()"
+    )
+    assert pos == ["static", False] or pos == ["relative", False], pos
+    assert _sidebar_in_viewport(mobile_page)
+    assert not mobile_page.locator("#btn-filters").is_visible()
+    assert not mobile_page.locator("#drawer-scrim").is_visible()

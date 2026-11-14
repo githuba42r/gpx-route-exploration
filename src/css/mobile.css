@@ -9,4 +9,22 @@
   #create-header input, #settings-bar input, #header input, #stats input,
   #create-header select, #settings-bar select { max-width: 100%; }
   #route-title { min-width: 0; width: 100%; }
+
+  /* Library: single column + off-canvas filter drawer */
+  .route-grid { grid-template-columns: 1fr; }
+  #route-list { padding: 12px; min-width: 0; }
+  .route-card { min-width: 0; overflow-wrap: anywhere; }
+  #btn-filters { display: inline-flex; align-items: center; align-self: flex-start; }
+  #sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 280px; max-width: 85vw;
+    z-index: 1000; transform: translateX(-100%); transition: transform 0.2s ease;
+    border-right: 1px solid #0f3460;
+  }
+  #sidebar.is-open { transform: translateX(0); }
+  #drawer-scrim {
+    display: block; position: fixed; inset: 0; z-index: 999;
+    background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  #drawer-scrim.is-open { opacity: 1; pointer-events: auto; }
+  #sidebar input[type="checkbox"], #sidebar input[type="radio"] { min-height: 0; min-width: 0; }
 }

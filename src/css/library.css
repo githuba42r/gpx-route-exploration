@@ -114,3 +114,6 @@
 /* Upload area pinned to the sidebar bottom — make the drop zone compact. */
 #sidebar #upload-area .upload-zone { padding: 14px 10px; font-size: 0.8em; }
 #sidebar #upload-area .upload-form { padding: 10px; }
+
+/* Mobile filter drawer controls: hidden on desktop (see mobile.css for <= 900px). */
+#btn-filters, #drawer-scrim { display: none; }

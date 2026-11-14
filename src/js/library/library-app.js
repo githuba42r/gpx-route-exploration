@@ -11,6 +11,7 @@ import { renderRouteCards } from './route-cards.js';
 import { renderCategoryPanel } from './category-panel.js';
 import { initUpload } from './upload.js';
 import { showMetadataEditor } from './metadata-editor.js';
+import { initFilterDrawer } from './filter-drawer.js';
 
 let categories = [];
 let routes = [];
@@ -135,6 +136,7 @@ async function refresh() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initFilterDrawer();
   // --- New Route button lives in the sidebar, above Categories ---
   const newRouteBtn = document.createElement('button');
   newRouteBtn.className = 'new-route-btn';
