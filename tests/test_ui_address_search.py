@@ -5,6 +5,7 @@ The live test server cannot mock Nominatim, so the browser's call to
 """
 
 import json
+import re
 
 import requests as http_requests
 from playwright.sync_api import expect
@@ -106,7 +107,6 @@ def test_stale_response_does_not_overwrite_newer_results(page, server_url):
     _open(page, server_url)
     inp = page.locator("#add-address")
     inp.fill("first query")
-    page.wait_for_function("() => true")
     for _ in range(50):
         if held:
             break
@@ -168,7 +168,29 @@ def test_busy_class_while_request_in_flight(page, server_url):
     page.route("**/api/geocode/search*", lambda r: held.append(r))
     _open(page, server_url)
     page.locator("#add-address").fill("Queen Street")
-    expect(page.locator("#address-bar")).to_have_class(__import__("re").compile(r"is-busy"))
+    expect(page.locator("#address-bar")).to_have_class(re.compile(r"is-busy"))
     _fulfil(held[0], RESULTS)
     expect(page.locator("#address-suggestions li")).to_have_count(3)
-    expect(page.locator("#address-bar")).not_to_have_class(__import__("re").compile(r"is-busy"))
+    expect(page.locator("#address-bar")).not_to_have_class(re.compile(r"is-busy"))
+
+
+def test_failed_add_keeps_the_query_and_shows_a_message(page, server_url):
+    page.route("**/api/geocode/search*", lambda r: _fulfil(r, RESULTS))
+
+    def wp_handler(route):
+        if route.request.method == "POST":
+            _fulfil(route, {"error": "boom"}, status=500)
+        else:
+            route.continue_()
+
+    page.route("**/api/routes/*/waypoints", wp_handler)
+    _open(page, server_url)
+    inp = page.locator("#add-address")
+    inp.fill("Queen Street")
+    expect(page.locator("#address-suggestions li")).to_have_count(3)
+    page.locator("#address-suggestions li").nth(0).click()
+    expect(page.locator("#address-status")).to_contain_text("Could not add stop")
+    expect(inp).to_have_value("Queen Street")
+    expect(page.locator("#address-suggestions li")).to_have_count(3)
+    expect(page.locator(".wpe-item")).to_have_count(0)
+    expect(page.locator("#address-bar")).not_to_have_class(re.compile(r"is-busy"))

@@ -50,20 +50,26 @@ export function initAddressSearch({ input, list, status, onSelect }) {
     });
   }
 
-  function choose(idx) {
+  async function choose(idx) {
     const it = results[idx];
     if (!it) return;
     const name = String(it.display_name).split(',')[0].trim() || it.display_name;
     cancelPending();
+    try {
+      await onSelect({
+        name,
+        address: it.display_name,
+        lat: parseFloat(it.lat),
+        lon: parseFloat(it.lon),
+      });
+    } catch (err) {
+      // Keep the query and suggestions so the user can retry.
+      setStatus('Could not add stop');
+      return;
+    }
     clear();
     setStatus('');
     input.value = '';
-    onSelect({
-      name,
-      address: it.display_name,
-      lat: parseFloat(it.lat),
-      lon: parseFloat(it.lon),
-    });
   }
 
   async function search(q) {
