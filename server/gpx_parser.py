@@ -40,6 +40,40 @@ def _smooth(elevations: list[float], window: int = 7) -> list[float]:
     return result
 
 
+def _child_text(el, tag: str):
+    child = el.find(f"{{{_NS}}}{tag}")
+    if child is None or child.text is None:
+        return None
+    text = child.text.strip()
+    return text or None
+
+
+def _parse_waypoints(root) -> list[dict]:
+    """Read direct <wpt> children of the root, skipping invalid coordinates."""
+    out = []
+    for el in root.findall(f"{{{_NS}}}wpt"):
+        try:
+            lat = float(el.get("lat"))
+            lon = float(el.get("lon"))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(lat) and math.isfinite(lon)):
+            continue
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            continue
+        type_text = _child_text(el, "type")
+        out.append(
+            {
+                "name": _child_text(el, "name") or f"Waypoint {len(out) + 1}",
+                "lat": lat,
+                "lon": lon,
+                "kind": "stop" if type_text and type_text.lower() == "stop" else "waypoint",
+                "description": _child_text(el, "desc"),
+            }
+        )
+    return out
+
+
 def parse_gpx(data: bytes) -> dict:
     """Parse raw GPX bytes and return a statistics dictionary.
 
@@ -53,6 +87,7 @@ def parse_gpx(data: bytes) -> dict:
         max_elevation    – maximum raw elevation in metres (float)
         max_gradient_asc – steepest ascending gradient as a percentage (float, > 0)
         max_gradient_desc– steepest descending gradient as a percentage (float, < 0)
+        waypoints        – list of {name, lat, lon, kind, description} from <wpt> (list)
 
     Raises
     ------
@@ -141,4 +176,5 @@ def parse_gpx(data: bytes) -> dict:
         "max_elevation": max_ele,
         "max_gradient_asc": max_grad_asc,
         "max_gradient_desc": max_grad_desc,
+        "waypoints": _parse_waypoints(root),
     }

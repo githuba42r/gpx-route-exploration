@@ -88,3 +88,69 @@ def test_generate_writes_wpt_for_included_waypoints_only(client, app):
     assert stored
     names = [w.find(f"{NS}name").text for w in _parse(stored).findall(f"{NS}wpt")]
     assert names == ["A", "C"]
+
+
+# --- Parser: <wpt> entries -------------------------------------------------
+
+from server.gpx_parser import parse_gpx  # noqa: E402
+
+_TRK = (
+    "<trk><trkseg>"
+    '<trkpt lat="-27.4467" lon="152.9293"><ele>68.2</ele></trkpt>'
+    '<trkpt lat="-27.4475" lon="152.9290"><ele>72.5</ele></trkpt>'
+    '<trkpt lat="-27.4483" lon="152.9285"><ele>78.0</ele></trkpt>'
+    "</trkseg></trk>"
+)
+
+
+def _gpx_with(wpts: str) -> bytes:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1">'
+        f"<metadata><name>T</name></metadata>{wpts}{_TRK}</gpx>"
+    ).encode()
+
+
+def test_parse_reads_wpt_kind_name_description():
+    data = _gpx_with(
+        '<wpt lat="-27.4" lon="152.9"><name>Cafe</name><desc>Coffee</desc>'
+        "<type>stop</type></wpt>"
+        '<wpt lat="-27.5" lon="153.0"><name>Turn</name><type>waypoint</type></wpt>'
+    )
+    wps = parse_gpx(data)["waypoints"]
+    assert wps == [
+        {"name": "Cafe", "lat": -27.4, "lon": 152.9, "kind": "stop", "description": "Coffee"},
+        {"name": "Turn", "lat": -27.5, "lon": 153.0, "kind": "waypoint", "description": None},
+    ]
+
+
+def test_parse_wpt_unknown_or_missing_type_is_waypoint():
+    data = _gpx_with(
+        '<wpt lat="1" lon="2"><name>A</name><type>Summit</type></wpt>'
+        '<wpt lat="1" lon="2"><name>B</name><type>STOP </type></wpt>'
+        '<wpt lat="1" lon="2"><name>C</name></wpt>'
+    )
+    kinds = [w["kind"] for w in parse_gpx(data)["waypoints"]]
+    assert kinds == ["waypoint", "stop", "waypoint"]
+
+
+def test_parse_wpt_missing_name_gets_generated_name():
+    data = _gpx_with('<wpt lat="1" lon="2"></wpt>')
+    assert parse_gpx(data)["waypoints"][0]["name"] == "Waypoint 1"
+
+
+def test_parse_wpt_bad_coordinates_skipped():
+    data = _gpx_with(
+        '<wpt lon="2"><name>nolat</name></wpt>'
+        '<wpt lat="abc" lon="2"><name>abc</name></wpt>'
+        '<wpt lat="91" lon="2"><name>hi</name></wpt>'
+        '<wpt lat="1" lon="181"><name>wide</name></wpt>'
+        '<wpt lat="1" lon="2"><name>ok</name></wpt>'
+    )
+    wps = parse_gpx(data)["waypoints"]
+    assert [w["name"] for w in wps] == ["ok"]
+
+
+def test_parse_without_wpt_returns_empty_list():
+    with open("tests/fixtures/sample.gpx", "rb") as f:
+        assert parse_gpx(f.read())["waypoints"] == []
