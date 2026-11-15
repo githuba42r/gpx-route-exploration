@@ -1,6 +1,7 @@
 """Per-user bookmarks (reusable locations). Every query is scoped by user_id."""
 
 import math
+import sqlite3
 import uuid
 
 from server.models import get_db
@@ -156,15 +157,22 @@ def photo_public(row):
 
 def add_photo(bookmark_id, *, storage_name, mime_type, byte_size):
     db = get_db()
-    nxt = db.execute(
-        "SELECT COALESCE(MAX(position), -1) + 1 FROM bookmark_photos WHERE bookmark_id = ?",
-        (bookmark_id,),
-    ).fetchone()[0]
-    cur = db.execute(
-        "INSERT INTO bookmark_photos (bookmark_id, position, storage_name, mime_type, byte_size) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (bookmark_id, nxt, storage_name, mime_type, byte_size),
-    )
+    # Tail position is computed inside the INSERT statement itself so it is
+    # atomic under SQLite's write lock; retry once on a lost race anyway.
+    for attempt in (0, 1):
+        try:
+            cur = db.execute(
+                "INSERT INTO bookmark_photos "
+                "(bookmark_id, position, storage_name, mime_type, byte_size) "
+                "SELECT ?, COALESCE(MAX(position), -1) + 1, ?, ?, ? "
+                "FROM bookmark_photos WHERE bookmark_id = ?",
+                (bookmark_id, storage_name, mime_type, byte_size, bookmark_id),
+            )
+            break
+        except sqlite3.IntegrityError:
+            db.rollback()
+            if attempt:
+                raise
     db.execute("UPDATE bookmarks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (bookmark_id,))
     db.commit()
     return get_photo(bookmark_id, cur.lastrowid)

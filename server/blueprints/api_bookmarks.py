@@ -208,9 +208,9 @@ def reorder_photos(bookmark_id):
     if err:
         return err
     data = request.get_json(silent=True)
-    ids = data.get("ids") if isinstance(data, dict) else None
+    ids = data.get("order") if isinstance(data, dict) else None
     if not bm.reorder_photos(bookmark_id, ids):
-        return _err("ids must be exactly the bookmark's current photo ids", 400)
+        return _err("order must be exactly the bookmark's current photo ids", 400)
     return jsonify([bm.photo_public(p) for p in bm.list_photos(bookmark_id)]), 200
 
 
@@ -225,7 +225,7 @@ def serve_photo(bookmark_id, photo_id):
         return _err("Not found", 404)
     data_dir = current_app.config["DATA_DIR"]
     path, mime = bp_files.photo_path(data_dir, user_id, b["uuid"], p["storage_name"]), p["mime_type"]
-    if request.args.get("thumb"):
+    if request.args.get("thumb", "").lower() in ("1", "true"):
         tpath = bp_files.photo_path(data_dir, user_id, b["uuid"], p["storage_name"], thumb=True)
         if bp_files.os.path.isfile(tpath):
             path, mime = tpath, "image/jpeg"
@@ -233,6 +233,7 @@ def serve_photo(bookmark_id, photo_id):
         return _err("Not found", 404)
     resp = make_response(send_file(path, mimetype=mime))
     resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
 

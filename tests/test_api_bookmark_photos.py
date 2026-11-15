@@ -88,8 +88,8 @@ def test_oversize_413(tmp_path):
         c = app.test_client()
         b = _mk(c)
         big = _img(size=(600, 600))
-        assert len(big) > 1000 or True
         big = big + b"\0" * 5000
+        assert len(big) > 1000
         assert _up(c, b["id"], data=big).status_code == 413
         assert _files(app) == []
 
@@ -146,12 +146,14 @@ def test_order_reorder_delete_compact(client, app):
     assert lst["thumb_url"] == f"/api/bookmarks/{b['id']}/photos/{ids[0]}?thumb=1"
 
     new = [ids[2], ids[0], ids[1]]
-    r = client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"ids": new}, headers=A)
+    r = client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"order": new}, headers=A)
     assert r.status_code == 200
     d = client.get(f"/api/bookmarks/{b['id']}", headers=A).get_json()
     assert [p["id"] for p in d["photos"]] == new
+    assert client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"ids": new},
+                      headers=A).status_code == 400
     for bad in ([ids[0]], new + [999], [new[0], new[0], new[1]], "x", None):
-        assert client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"ids": bad},
+        assert client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"order": bad},
                           headers=A).status_code == 400
     assert [p["id"] for p in client.get(f"/api/bookmarks/{b['id']}", headers=A).get_json()["photos"]] == new
 
@@ -220,7 +222,7 @@ def test_cross_user_404(client, app):
     assert client.get(p["url"], headers=B).status_code == 404
     assert client.get(p["thumb_url"], headers=B).status_code == 404
     assert client.delete(f"/api/bookmarks/{b['id']}/photos/{p['id']}", headers=B).status_code == 404
-    assert client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"ids": [p["id"]]},
+    assert client.put(f"/api/bookmarks/{b['id']}/photos/order", json={"order": [p["id"]]},
                       headers=B).status_code == 404
     assert len(_files(app)) == n
     assert client.get(p["url"], headers=A).status_code == 200
@@ -250,3 +252,92 @@ def test_db_failure_cleans_files(client, app, monkeypatch):
     r = _up(client, b["id"])
     assert r.status_code == 500
     assert _files(app) == []
+
+
+def _thumb_of(client, app, data, fmt_mime="image/png"):
+    b = _mk(client)
+    r = _up(client, b["id"], data=data, mime=fmt_mime)
+    assert r.status_code == 201, r.get_json()
+    t = client.get(r.get_json()["thumb_url"], headers=A)
+    assert t.status_code == 200 and t.headers["Content-Type"] == "image/jpeg"
+    im = Image.open(io.BytesIO(t.data))
+    im.load()
+    assert im.format == "JPEG"
+    return im
+
+
+def test_rgba_png_thumb(client, app):
+    buf = io.BytesIO()
+    Image.new("RGBA", (500, 300), (255, 0, 0, 128)).save(buf, "PNG")
+    assert _thumb_of(client, app, buf.getvalue()).size == (320, 192)
+
+
+def test_palette_png_thumb(client, app):
+    buf = io.BytesIO()
+    Image.new("P", (400, 400)).save(buf, "PNG")
+    assert max(_thumb_of(client, app, buf.getvalue()).size) <= 320
+
+
+def test_exif_orientation_applied(client, app):
+    im = Image.new("RGB", (400, 200), (10, 200, 10))
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=exif)
+    assert _thumb_of(client, app, buf.getvalue(), "image/jpeg").size == (160, 320)
+
+
+def test_nosniff_and_thumb_flag(client):
+    b = _mk(client)
+    p = _up(client, b["id"], data=_img("JPEG"), fmt="JPEG").get_json()
+    r = client.get(p["url"], headers=A)
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert client.get(p["thumb_url"], headers=A).headers["X-Content-Type-Options"] == "nosniff"
+    full = client.get(p["url"], headers=A).data
+    assert client.get(p["url"] + "?thumb=0", headers=A).data == full
+    assert client.get(p["url"] + "?thumb=", headers=A).data == full
+    assert client.get(p["url"] + "?thumb=true", headers=A).data != full
+
+
+def test_concurrent_add_photo_positions(app):
+    import threading
+    from server.models import bookmarks as bm
+    b = bm.create_bookmark("u", name="c", lat=0, lon=0)
+    n = 8
+    barrier = threading.Barrier(n)
+    results, errors = [], []
+
+    def work(i):
+        with app.app_context():
+            barrier.wait()
+            try:
+                results.append(bm.add_photo(b["id"], storage_name=f"{i}.png",
+                                            mime_type="image/png", byte_size=1)["position"])
+            except Exception as e:  # noqa
+                errors.append(e)
+
+    ts = [threading.Thread(target=work, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errors, errors
+    assert sorted(results) == list(range(n))
+
+
+def test_concurrent_uploads_http(client, app):
+    import threading
+    b = _mk(client)
+    barrier = threading.Barrier(2)
+    codes = []
+
+    def work():
+        c = app.test_client()
+        barrier.wait()
+        codes.append(_up(c, b["id"]).status_code)
+
+    ts = [threading.Thread(target=work) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert codes == [201, 201]
+    d = client.get(f"/api/bookmarks/{b['id']}", headers=A).get_json()
+    assert [p["position"] for p in d["photos"]] == [0, 1]
+    assert len(_files(app)) == 4
