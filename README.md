@@ -218,7 +218,7 @@ Bookmarks are saved places (name, description, coordinates, tags and photos) tha
 
 The backup scheduler starts automatically with the Flask application. At each interval (default: hourly) it:
 
-1. Creates a consistent snapshot of `routes.db` using the SQLite backup API, along with the entire `gpx/` directory tree, and archives them as a `.tar.gz` in `<DATA_DIR>/backups/daily/`.
+1. Creates a consistent snapshot of `routes.db` using the SQLite backup API, along with the entire `gpx/` directory tree and the `bookmarks/` directory (bookmark photos and thumbnails), and archives them as a `.tar.gz` in `<DATA_DIR>/backups/daily/`.
 2. If today's backup already exists, the run is a no-op.
 3. Runs promotion and purge: when a tier exceeds its retention limit, the oldest files are moved to the next tier.
 

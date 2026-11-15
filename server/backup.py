@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_backup(data_dir, today=None):
-    """Create a daily backup tarball containing routes.db and gpx/ tree.
+    """Create a daily backup tarball containing routes.db, the gpx/ tree and bookmarks/ (photos).
 
     Uses the sqlite3 backup API for a consistent DB snapshot. If today's
     backup already exists, returns the existing path without overwriting.
@@ -33,6 +33,7 @@ def create_backup(data_dir, today=None):
 
     db_path = os.path.join(data_dir, "routes.db")
     gpx_dir = os.path.join(data_dir, "gpx")
+    bookmarks_dir = os.path.join(data_dir, "bookmarks")
 
     # Use a temp file within data_dir to avoid cross-device issues.
     tmp_fd, tmp_db_path = tempfile.mkstemp(dir=data_dir, suffix=".db")
@@ -53,6 +54,8 @@ def create_backup(data_dir, today=None):
             tar.add(tmp_db_path, arcname="routes.db")
             if os.path.isdir(gpx_dir):
                 tar.add(gpx_dir, arcname="gpx")
+            if os.path.isdir(bookmarks_dir):
+                tar.add(bookmarks_dir, arcname="bookmarks")
     finally:
         if os.path.exists(tmp_db_path):
             os.unlink(tmp_db_path)

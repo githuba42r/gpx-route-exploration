@@ -153,3 +153,17 @@ def test_backup_db_consistency(tmp_path):
     rows = conn.execute("SELECT id FROM test").fetchall()
     conn.close()
     assert rows == [(1,)]
+
+
+def test_backup_includes_bookmark_photos(tmp_path):
+    data_dir = _setup_data_dir(tmp_path)
+    d = os.path.join(data_dir, "bookmarks", "alice", "abc123")
+    os.makedirs(d)
+    for n in ("p1.png", "p1.png.thumb.jpg"):
+        with open(os.path.join(d, n), "wb") as f:
+            f.write(b"x")
+    path = create_backup(data_dir, today=date(2026, 1, 1))
+    with tarfile.open(path) as tar:
+        names = tar.getnames()
+    assert "bookmarks/alice/abc123/p1.png" in names
+    assert "bookmarks/alice/abc123/p1.png.thumb.jpg" in names
