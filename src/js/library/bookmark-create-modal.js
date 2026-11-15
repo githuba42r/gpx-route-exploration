@@ -5,6 +5,7 @@
 
 import { api } from './api-client.js';
 import { attachTileLayers } from '../shared/map-layers.js';
+import { createTagInput } from './tag-input.js';
 
 const DEFAULT_CENTER = [-27.4705, 153.0260];
 
@@ -15,7 +16,7 @@ function parseCoord(text, min, max) {
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
-export function showBookmarkCreate({ onCreated }) {
+export function showBookmarkCreate({ onCreated, tagNames = [] }) {
   const overlay = document.getElementById('bookmark-modal-overlay');
   overlay.innerHTML = '';
   overlay.classList.add('visible');
@@ -27,11 +28,15 @@ export function showBookmarkCreate({ onCreated }) {
     <h3 class="modal-title">New bookmark</h3>
     <div class="form-group">
       <label>Name <span class="required">*</span></label>
-      <input type="text" class="tag-input bm-name" maxlength="200" />
+      <input type="text" class="tag-input bm-name" maxlength="120" />
     </div>
     <div class="form-group">
       <label>Description</label>
       <textarea class="tag-input bm-desc" rows="2"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Tags</label>
+      <div class="bm-tags"></div>
     </div>
     <div class="form-group">
       <label>Location (click the map or type coordinates)</label>
@@ -56,12 +61,18 @@ export function showBookmarkCreate({ onCreated }) {
   const lonIn = box.querySelector('.bm-lon');
   const saveBtn = box.querySelector('.bm-save');
   const errEl = box.querySelector('.bm-error');
+  const tagInput = createTagInput(box.querySelector('.bm-tags'), tagNames, () => {});
 
   let map = null;
   let marker = null;
   let saving = false;
 
+  let closed = false;
+  const backdrop = new AbortController();
   function close() {
+    if (closed) return;
+    closed = true;
+    backdrop.abort();
     if (map) { map.remove(); map = null; }
     overlay.classList.remove('visible');
     overlay.innerHTML = '';
@@ -105,7 +116,8 @@ export function showBookmarkCreate({ onCreated }) {
     validate();
   }));
   box.querySelector('.bm-cancel').addEventListener('click', close);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); },
+    { signal: backdrop.signal });
 
   saveBtn.addEventListener('click', async () => {
     if (saving) return;
@@ -116,6 +128,7 @@ export function showBookmarkCreate({ onCreated }) {
     try {
       await api.createBookmark({
         name: nameIn.value.trim(), description: descIn.value.trim(), lat, lon,
+        tags: tagInput.getTags(),
       });
     } catch (err) {
       saving = false;

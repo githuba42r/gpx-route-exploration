@@ -132,6 +132,7 @@ export function initBookmarksTab(container, { getTagNames, onChanged }) {
   searchInput.addEventListener('input', () => { search = searchInput.value; render(); });
   sortSel.addEventListener('change', () => { sort = sortSel.value; render(); });
   newBtn.addEventListener('click', () => showBookmarkCreate({
+    tagNames: getTagNames(),
     onCreated: async () => { await load(); if (onChanged) await onChanged(); },
   }));
 

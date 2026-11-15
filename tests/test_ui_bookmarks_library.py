@@ -278,3 +278,51 @@ def test_mobile_layout(mobile_page, server_url):
     bb = cr.bounding_box()
     assert bb["x"] >= 0 and bb["x"] + bb["width"] <= 390
     assert bb["y"] >= 0 and bb["y"] + bb["height"] <= 844
+
+
+# --- M8 fix wave: modal listener leak, maxlength, tags on create ---
+
+def test_backdrop_listener_does_not_pile_up(page, server_url, tmp_path):
+    seed(server_url, "Leaky")
+    open_bookmarks(page, server_url)
+    for _ in range(3):
+        page.locator(".bookmark-card").first.click()
+        ed = page.locator("#bookmark-editor")
+        ed.locator(".bm-save").click()
+        expect(ed).to_be_hidden()
+    page.locator(".bookmark-card").first.click()
+    ed = page.locator("#bookmark-editor")
+    expect(ed).to_be_visible()
+    ed.locator("input[type=file]").set_input_files(photo_file(tmp_path, "a.png", "red"))
+    expect(ed.locator(".bm-photo")).to_have_count(1)
+    lists = []
+    page.on("request", lambda r: lists.append(r.url) if r.method == "GET" and r.url.endswith("/api/bookmarks") else None)
+    page.mouse.click(5, 5)  # backdrop
+    expect(ed).to_be_hidden()
+    page.wait_for_timeout(500)
+    assert len(lists) == 1, lists
+
+
+def test_name_maxlength_matches_server(page, server_url):
+    seed(server_url, "X")
+    open_bookmarks(page, server_url)
+    page.locator("#bookmark-new, .bookmarks-new, button:has-text('New bookmark')").first.click()
+    assert page.locator("#bookmark-create .bm-name").get_attribute("maxlength") == "120"
+    page.locator("#bookmark-create .bm-cancel").click()
+    page.locator(".bookmark-card").first.click()
+    assert page.locator("#bookmark-editor .bm-name").get_attribute("maxlength") == "120"
+
+
+def test_create_modal_with_tags_shows_chips(page, server_url):
+    open_bookmarks(page, server_url)
+    page.locator("button:has-text('New bookmark')").first.click()
+    modal = page.locator("#bookmark-create")
+    modal.locator(".bm-name").fill("Tagged")
+    modal.locator(".bm-lat").fill("-27.5")
+    modal.locator(".bm-lon").fill("153.0")
+    modal.locator(".bm-tags input").fill("cafe")
+    modal.locator(".bm-tags input").press("Enter")
+    modal.locator(".bm-save").click()
+    expect(modal).to_be_hidden()
+    expect(page.locator(".bookmark-card .bookmark-tag")).to_have_text(["cafe"])
+    assert [t["name"] for t in http_requests.get(f"{server_url}/api/bookmarks").json()[0]["tags"]] == ["cafe"]

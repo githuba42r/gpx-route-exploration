@@ -36,7 +36,7 @@ export async function showBookmarkEditor(id, { tagNames = [], onChanged }) {
     <h3 class="modal-title">Edit bookmark</h3>
     <div class="form-group">
       <label>Name <span class="required">*</span></label>
-      <input type="text" class="tag-input bm-name" maxlength="200" />
+      <input type="text" class="tag-input bm-name" maxlength="120" />
     </div>
     <div class="form-group">
       <label>Description</label>
@@ -159,14 +159,20 @@ export async function showBookmarkEditor(id, { tagNames = [], onChanged }) {
     busy = false;
   });
 
+  let closed = false;
+  const backdrop = new AbortController();
   async function close() {
+    if (closed) return;
+    closed = true;
+    backdrop.abort();
     overlay.classList.remove('visible');
     overlay.innerHTML = '';
     if (dirty && onChanged) await onChanged();
   }
 
   box.querySelector('.bm-close').addEventListener('click', close);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); },
+    { signal: backdrop.signal });
 
   let saving = false;
   saveBtn.addEventListener('click', async () => {
