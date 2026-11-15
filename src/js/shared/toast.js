@@ -25,7 +25,7 @@ export function showToast(message, { href, linkText } = {}) {
   msg.textContent = String(message);
   el.appendChild(msg);
 
-  if (href && linkText && /^\/(?!\/)/.test(href)) {
+  if (href && linkText && /^\/(?![\/\\])/.test(href)) {
     const a = document.createElement('a');
     a.className = 'app-toast-link';
     a.setAttribute('href', href);

@@ -285,3 +285,19 @@ def test_long_press_analysis_marker_entry_tall_enough(mobile_page, server_url):
     item.tap()
     expect(page.locator(".app-toast")).to_contain_text("Saved to bookmarks")
     assert bookmarks(server_url)[0]["name"] == "Phone"
+
+
+# --- M8 fix wave: toast href hardening ---
+
+@pytest.mark.parametrize("href,rendered", [
+    ("/#bookmarks", True), ("//evil.com", False), ("/\\evil.com", False),
+    ("https://evil.com", False), ("javascript:alert(1)", False),
+])
+def test_toast_link_href_validation(page, server_url, href, rendered):
+    import os
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "js", "shared", "toast.js")).read()
+    page.set_content("<body></body>")
+    page.add_script_tag(type="module", content=src + "\nwindow.__st = showToast;")
+    page.wait_for_function("window.__st")
+    page.evaluate("([h]) => window.__st('hi', {href: h, linkText: 'View'})", [href])
+    assert page.locator(".app-toast a").count() == (1 if rendered else 0)

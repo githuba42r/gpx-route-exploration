@@ -242,7 +242,7 @@ export function initContextMenu(map, points, gradSectionsRef) {
   ctxSaveBookmark.addEventListener('click', () => {
     const m = shared.ctxTargetWaypoint;
     if (m) {
-      const ll = m.getLatLng();
+      const ll = m.getLatLng().wrap(); // world-copy longitudes -> -180..180
       saveBookmarkPoint({ name: m._wpLabel, lat: ll.lat, lon: ll.lng });
     }
     hideCtxMenu();
