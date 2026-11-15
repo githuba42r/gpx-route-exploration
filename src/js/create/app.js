@@ -102,15 +102,31 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
 
 // -------------------- route bootstrap --------------------
 
+// Returns the route id, or null when the URL carries a route_id that is not a
+// positive integer (never creates a new route in that case).
 async function ensureRouteId() {
   const url = new URL(window.location.href);
   const existing = url.searchParams.get('route_id');
-  if (existing) return Number(existing);
+  if (existing !== null) {
+    return /^[1-9]\d*$/.test(existing) ? Number(existing) : null;
+  }
   const titleInput = document.getElementById('route-title');
   const route = await api.createRouteRecipe({ title: titleInput.value.trim() || 'Untitled Route' });
   url.searchParams.set('route_id', route.id);
   history.replaceState(null, '', url.toString());
   return route.id;
+}
+
+// Replace the editor with the load-error panel. Nothing else on the page is
+// initialised, so no handler can issue requests against a bad id.
+function showRouteLoadError(kind) {
+  document.body.classList.add('route-load-failed');
+  const panel = document.getElementById('route-load-error');
+  panel.querySelector('.rle-msg').textContent =
+    kind === 'not-found' ? 'Route not found' : 'Could not load route';
+  panel.querySelector('.rle-retry').hidden = kind === 'not-found';
+  panel.querySelector('.rle-retry').onclick = () => window.location.reload();
+  panel.hidden = false;
 }
 
 const TITLE_SUFFIX = ' \u2014 GPX Route Exploration';
@@ -124,16 +140,19 @@ function applyTitle(title) {
 }
 
 // Fetch the existing route's title and populate the title surfaces.
-// Returns the title, or null on failure (input left as is, nothing saved).
+// Returns the (normalised) title; null when the route does not exist (404);
+// throws on any other failure.
 async function loadRouteTitle(routeId) {
+  let route;
   try {
-    const route = await api.getRoute(routeId);
-    applyTitle(route.title);
-    return route.title;
+    route = await api.getRoute(routeId);
   } catch (err) {
-    console.error('Could not load route title', err);
-    return null;
+    if (/\u2192 404:/.test(err.message)) return null;
+    throw err;
   }
+  const title = String(route.title ?? '').trim() || 'Untitled Route';
+  applyTitle(title);
+  return title;
 }
 
 // -------------------- drawing --------------------
@@ -1171,9 +1190,20 @@ async function main() {
   const freshTitle = titleInput.value.trim() || 'Untitled Route';
   state.savedTitle = null;
   state.routeId = await ensureRouteId();
-  // Runs in parallel with map creation; awaited before the blur handler.
-  const titleLoad = arrivedWithRouteId ? loadRouteTitle(state.routeId) : null;
-  if (!arrivedWithRouteId) state.savedTitle = freshTitle;
+  if (state.routeId === null) { showRouteLoadError('not-found'); return; }
+  if (arrivedWithRouteId) {
+    try {
+      state.savedTitle = await loadRouteTitle(state.routeId);
+    } catch (err) {
+      console.error('Could not load route', err);
+      showRouteLoadError('failed');
+      return;
+    }
+    if (state.savedTitle === null) { showRouteLoadError('not-found'); return; }
+    titleInput.disabled = false;
+  } else {
+    state.savedTitle = freshTitle;
+  }
   state.map = initCreateMap('map');
 
   // Playwright + debug hook: expose state so tests can assert on or
@@ -1370,10 +1400,6 @@ async function main() {
   });
 
   // --- Title blur → persist (only a changed, non-blank title) ---
-  if (titleLoad) {
-    state.savedTitle = await titleLoad;
-    titleInput.disabled = false;
-  }
   titleInput.addEventListener('blur', async (e) => {
     if (state.savedTitle === null) return; // title never loaded: don't PATCH
     const title = e.target.value.trim();

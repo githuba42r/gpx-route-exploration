@@ -284,4 +284,5 @@ def test_save_on_same_row_as_generate_at_360(page, server_url):
     s = page.locator("#btn-save").bounding_box()
     assert abs(g["y"] - s["y"]) <= 4, (g, s)
     m = page.locator("#map").bounding_box()
-    assert 205 <= m["height"] <= 220, m
+    # Upper bound loosened: the nav now shows the real (shorter) route title, so it no longer wraps.
+    assert 205 <= m["height"] <= 270, m

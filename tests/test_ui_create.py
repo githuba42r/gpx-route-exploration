@@ -1150,3 +1150,102 @@ def test_new_route_unchanged(page, server_url):
     page.locator("#route-title").blur()
     page.wait_for_timeout(300)
     assert patches == []
+
+
+# ---- unknown / invalid route_id (create-title fix, Task 2) ----
+
+def _collect_mutations(page):
+    muts = []
+    page.on("request", lambda req: muts.append(f"{req.method} {req.url}")
+            if req.method in ("POST", "PATCH", "PUT", "DELETE") else None)
+    return muts
+
+
+def _assert_not_found_panel(page, muts):
+    panel = page.locator("#route-load-error")
+    expect(panel).to_be_visible(timeout=8000)
+    expect(panel).to_contain_text("Route not found")
+    link = panel.locator("a[href='/']")
+    expect(link).to_be_visible()
+    expect(page.locator("#editor-panel")).to_be_hidden()
+    expect(page.locator("#map")).to_be_hidden()
+    page.wait_for_timeout(300)
+    assert muts == []
+    assert page.evaluate("() => location.search") is not None
+
+
+def test_create_unknown_route_shows_not_found(page, server_url):
+    muts = _collect_mutations(page)
+    errs = []
+    page.on("pageerror", lambda e: errs.append(str(e)))
+    page.goto(f"{server_url}/create?route_id=999999")
+    _assert_not_found_panel(page, muts)
+    assert errs == []
+
+
+def test_create_foreign_route_shows_not_found(browser, server_url):
+    rid = http_requests.post(f"{server_url}/api/routes",
+                             json={"title": "Not yours", "profile": "bicycle"},
+                             headers={"Remote-User": "user-a"}).json()["id"]
+    ctx = browser.new_context(extra_http_headers={"Remote-User": "user-b"})
+    page = ctx.new_page()
+    try:
+        muts = _collect_mutations(page)
+        page.goto(f"{server_url}/create?route_id={rid}")
+        _assert_not_found_panel(page, muts)
+    finally:
+        ctx.close()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("bad", ["abc", "0", "-3", "1.5", ""])
+def test_create_non_numeric_route_id(page, server_url, bad):
+    muts = _collect_mutations(page)
+    urls = []
+    page.on("request", lambda req: urls.append(req.url))
+    errs = []
+    page.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+    page.goto(f"{server_url}/create?route_id={bad}")
+    _assert_not_found_panel(page, muts)
+    assert not any("/api/routes/NaN" in u for u in urls)
+    assert not any("NaN" in e for e in errs)
+
+
+def test_create_route_load_500_shows_retry(page, server_url):
+    rid = _seed_route(server_url, "Retry Me")
+    muts = _collect_mutations(page)
+    page.route(f"**/api/routes/{rid}",
+               lambda route: route.fulfill(status=500, body="boom")
+               if route.request.method == "GET" else route.continue_())
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{server_url}/create?route_id={rid}")
+    panel = page.locator("#route-load-error")
+    expect(panel).to_be_visible(timeout=8000)
+    expect(panel).to_contain_text("Could not load route")
+    retry = panel.get_by_role("button", name="Retry")
+    expect(retry).to_be_visible()
+    assert retry.bounding_box()["height"] >= 44
+    assert muts == []
+    page.unroute(f"**/api/routes/{rid}")
+    retry.click()
+    page.wait_for_function("() => window.__appReady === true", timeout=8000)
+    expect(page.locator("#route-title")).to_have_value("Retry Me")
+    expect(page.locator("#route-load-error")).to_be_hidden()
+
+
+def test_create_blank_server_title_falls_back_without_patch(page, server_url):
+    rid = _seed_route(server_url, "Temp")
+    http_requests.patch(f"{server_url}/api/routes/{rid}", json={"title": "x"})
+    patches = _track_patches(page, rid)
+    page.route(f"**/api/routes/{rid}",
+               lambda route: route.fulfill(status=200, content_type="application/json",
+                                           body='{"id": %d, "title": "  "}' % rid)
+               if route.request.method == "GET" else route.continue_())
+    _open_create(page, server_url, rid)
+    expect(page.locator("#route-title")).to_have_value("Untitled Route")
+    page.locator("#route-title").focus()
+    page.locator("#route-title").blur()
+    page.wait_for_timeout(300)
+    assert patches == []

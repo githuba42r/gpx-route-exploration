@@ -10,6 +10,11 @@
    title="Open this route's gradient &amp; elevation analysis">Route Analysis</a>
 {% endblock %}
 {% block content %}
+<div id="route-load-error" role="alert" hidden>
+  <p class="rle-msg"></p>
+  <a class="rle-link" href="/">&larr; Back to Library</a>
+  <button class="rle-retry" type="button" hidden>Retry</button>
+</div>
 <div id="create-header">
   <input id="route-title" type="text" placeholder="Route title…" value="Untitled Route">
   <span id="create-hint">Click = drop waypoint · Ctrl+click = drop stop · right-click a pin for more · dashed line = preview.</span>

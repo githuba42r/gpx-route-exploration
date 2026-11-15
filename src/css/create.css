@@ -232,3 +232,14 @@
  * wrapper is layout-transparent so the desktop header is unchanged. */
 #create-secondary { display: contents; }
 #btn-header-more, #create-hint-touch, .sheet-handle { display: none; }
+
+/* Route load error: shown instead of the editor when route_id can't be loaded. */
+#route-load-error { margin: 24px 16px; padding: 16px; max-width: 480px; background: #16213e; border: 1px solid #2a3a5e; border-radius: 6px; }
+#route-load-error[hidden] { display: none; }
+#route-load-error .rle-msg { margin: 0 0 12px; font-size: 1.1em; }
+#route-load-error .rle-link { display: inline-flex; align-items: center; min-height: 44px; margin-right: 12px; }
+#route-load-error .rle-retry[hidden] { display: none; }
+body.route-load-failed #create-header,
+body.route-load-failed #generate-error,
+body.route-load-failed #address-bar,
+body.route-load-failed #create-main { display: none !important; }
