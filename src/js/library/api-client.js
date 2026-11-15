@@ -50,4 +50,25 @@ export const api = {
     apiFetch(`/api/categories/${categoryId}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) }),
   deleteTag: (id) =>
     apiFetch(`/api/tags/${id}`, { method: 'DELETE' }),
+
+  // Bookmarks
+  listBookmarks: () => apiFetch('/api/bookmarks'),
+  getBookmark: (id) => apiFetch(`/api/bookmarks/${id}`),
+  createBookmark: (data) =>
+    apiFetch('/api/bookmarks', { method: 'POST', body: JSON.stringify(data) }),
+  updateBookmark: (id, data) =>
+    apiFetch(`/api/bookmarks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteBookmark: (id) =>
+    apiFetch(`/api/bookmarks/${id}`, { method: 'DELETE' }),
+  setBookmarkTags: (id, tags) =>
+    apiFetch(`/api/bookmarks/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) }),
+  uploadBookmarkPhoto: (id, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return apiFetch(`/api/bookmarks/${id}/photos`, { method: 'POST', body: fd, _skipContentType: true });
+  },
+  deleteBookmarkPhoto: (id, photoId) =>
+    apiFetch(`/api/bookmarks/${id}/photos/${photoId}`, { method: 'DELETE' }),
+  reorderBookmarkPhotos: (id, order) =>
+    apiFetch(`/api/bookmarks/${id}/photos/order`, { method: 'PUT', body: JSON.stringify({ order }) }),
 };

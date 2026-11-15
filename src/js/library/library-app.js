@@ -12,11 +12,14 @@ import { renderCategoryPanel } from './category-panel.js';
 import { initUpload } from './upload.js';
 import { showMetadataEditor } from './metadata-editor.js';
 import { initFilterDrawer } from './filter-drawer.js';
+import { initBookmarksTab } from './bookmarks-tab.js';
 
 let categories = [];
 let routes = [];
 let tags = [];
 let activeTag = null;
+let bookmarksTab = null;
+let currentTab = 'routes';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -38,6 +41,7 @@ function filteredRoutes() {
 function renderAll() {
   renderTagCloud($('#tag-cloud-container'), tags, (tagName) => {
     activeTag = tagName;
+    if (bookmarksTab) bookmarksTab.setTag(activeTag);
     renderAll();
   }, activeTag);
 
@@ -130,6 +134,34 @@ function showMoveSelector(routeId, currentCatId) {
   });
 }
 
+function applyTab() {
+  const want = window.location.hash === '#bookmarks' ? 'bookmarks' : 'routes';
+  currentTab = want;
+  const isBm = want === 'bookmarks';
+  $('#tab-routes').setAttribute('aria-selected', String(!isBm));
+  $('#tab-bookmarks').setAttribute('aria-selected', String(isBm));
+  $('#routes-container').hidden = isBm;
+  $('#bookmarks-container').hidden = !isBm;
+  if (isBm && bookmarksTab) bookmarksTab.load();
+}
+
+function initTabs() {
+  bookmarksTab = initBookmarksTab($('#bookmarks-container'), {
+    getTagNames: () => tags.map((t) => t.name),
+    // Bookmark changes alter tag usage counts in the sidebar cloud.
+    onChanged: async () => { tags = await api.getTags(); renderAll(); },
+  });
+  bookmarksTab.setTag(activeTag);
+  $('#tab-routes').addEventListener('click', () => {
+    if (currentTab !== 'routes') window.location.hash = '#routes';
+  });
+  $('#tab-bookmarks').addEventListener('click', () => {
+    if (currentTab !== 'bookmarks') window.location.hash = '#bookmarks';
+  });
+  window.addEventListener('hashchange', applyTab);
+  applyTab();
+}
+
 async function refresh() {
   await loadData();
   renderAll();
@@ -137,6 +169,7 @@ async function refresh() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initFilterDrawer();
+  initTabs();
   // --- New Route button lives in the sidebar, above Categories ---
   const newRouteBtn = document.createElement('button');
   newRouteBtn.className = 'new-route-btn';

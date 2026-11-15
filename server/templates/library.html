@@ -13,13 +13,20 @@
     <div id="upload-area"></div>
   </aside>
   <main id="route-list">
+    <div id="library-tabs" role="tablist">
+      <button id="tab-routes" type="button" role="tab" aria-selected="true">Routes</button>
+      <button id="tab-bookmarks" type="button" role="tab" aria-selected="false">Bookmarks</button>
+    </div>
     <button id="btn-filters" type="button">Filters</button>
     <div id="routes-container"></div>
+    <div id="bookmarks-container" hidden></div>
   </main>
 </div>
-<div id="confirm-modal-overlay" class="modal-overlay"></div>
 <div id="metadata-modal-overlay" class="modal-overlay"></div>
+<div id="bookmark-modal-overlay" class="modal-overlay"></div>
+<div id="confirm-modal-overlay" class="modal-overlay"></div>
 {% endblock %}
 {% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/static/dist/library.min.js?v={{ asset_version }}"></script>
 {% endblock %}
