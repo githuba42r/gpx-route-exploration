@@ -71,4 +71,24 @@
   #editor-panel.wpe-collapsed .wpe-head strong { display: inline; }
   #editor-panel.wpe-collapsed .wpe-tabs, #editor-panel.wpe-collapsed .wpe-totals { display: flex; }
   #editor-panel.wpe-collapsed .wpe-list { display: block; }
+
+  /* Analysis: stacked, page scrolls vertically; map takes a sensible height */
+  body[data-gpx-file] { height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; }
+  body[data-gpx-file] #main { flex: none; min-height: 0; min-width: 0; }
+  body[data-gpx-file] #map { flex: none; width: 100%; height: max(240px, 50dvh); min-height: 240px; }
+  #header { padding-left: 12px; padding-right: 12px; min-width: 0; }
+  #track-name, #track-subtitle, .nav-route-title { overflow-wrap: anywhere; min-width: 0; }
+  .nav-route-title { max-width: 100%; }
+  #stats { padding: 8px 12px; gap: 8px 12px; }
+  .stat { min-width: 0; flex: 1 1 90px; }
+  #settings-bar { padding: 8px 12px; gap: 8px 12px; }
+  .setting-group { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .setting-group input[type="range"] { width: 100px; max-width: 100%; }
+  #legend {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: 8px 12px;
+    scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+  }
+  #legend > * { flex: none; white-space: nowrap; scroll-snap-align: start; }
+  #profile-container { height: 160px; flex: none; }
+  #profile-canvas { touch-action: none; }
 }

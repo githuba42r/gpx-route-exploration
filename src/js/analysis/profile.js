@@ -211,11 +211,17 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
     return distMin + ((mx - padL) / plotW) * distSpan;
   }
 
-  container.addEventListener('mousemove', (e) => {
-    if (dragState) return; // handled by drag handler
+  // Touch devices emit compatibility mouse events after a touch; ignore them
+  // so the pointer path below is the only one that handles touch input.
+  let lastTouchTs = -Infinity;
+  const TOUCH_MOUSE_GUARD_MS = 800;
+  function isCompatMouse() { return performance.now() - lastTouchTs < TOUCH_MOUSE_GUARD_MS; }
+
+  // Show hover info + map marker for clientX. Returns false when outside the view.
+  function showHoverAt(clientX) {
     const { distMin, distMax } = profileParams;
-    const dist = distAtClientX(e.clientX);
-    if (dist < distMin || dist > distMax) { hoverInfo.style.display = 'none'; return; }
+    const dist = distAtClientX(clientX);
+    if (dist < distMin || dist > distMax) { hoverInfo.style.display = 'none'; return false; }
 
     let closest = 0, minD = Infinity;
     for (let i = 0; i < points.length; i++) {
@@ -238,11 +244,23 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
 
     posMarker.setLatLng([p.lat, p.lon]);
     posMarker.setStyle({ opacity: 1, fillOpacity: 1 });
+    return true;
+  }
+
+  function hideHover() {
+    hoverInfo.style.display = 'none';
+    posMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+  }
+
+  container.addEventListener('mousemove', (e) => {
+    if (isCompatMouse()) return;
+    if (dragState) return; // handled by drag handler
+    showHoverAt(e.clientX);
   });
 
   container.addEventListener('mouseleave', () => {
-    hoverInfo.style.display = 'none';
-    posMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+    if (isCompatMouse()) return;
+    hideHover();
   });
 
   // --- Drag-to-select (with click fallback for pan) ---
@@ -269,6 +287,7 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
   }
 
   container.addEventListener('mousedown', (e) => {
+    if (isCompatMouse()) return;
     if (e.button !== 0) return;
     if (!inPlotArea(e.clientX, e.clientY)) return;
     const rect = canvas.getBoundingClientRect();
@@ -281,6 +300,7 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (isCompatMouse()) return;
     if (!dragState) return;
     const rect = canvas.getBoundingClientRect();
     const curCanvasX = Math.max(
@@ -301,6 +321,7 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
   });
 
   window.addEventListener('mouseup', (e) => {
+    if (isCompatMouse()) return;
     if (!dragState) return;
     const wasDrag = dragState.moved;
     const startCanvasX = dragState.startCanvasX;
@@ -329,6 +350,87 @@ export function initProfile(points, stats, map, posMarker, onSelectionChange) {
       map.panTo([points[closest].lat, points[closest].lon]);
     }
   });
+
+  // --- Touch (Pointer Events): tap pins hover info, one-finger drag selects a zoom range ---
+  let touchState = null;
+
+  function commitSelection(startCanvasX, endCanvasX) {
+    const rect = canvas.getBoundingClientRect();
+    const { padL, plotW, distMin, distSpan } = profileParams;
+    const x1 = Math.max(padL, Math.min(rect.width - profileParams.padR, Math.min(startCanvasX, endCanvasX)));
+    const x2 = Math.max(padL, Math.min(rect.width - profileParams.padR, Math.max(startCanvasX, endCanvasX)));
+    setViewRange({
+      distMin: distMin + ((x1 - padL) / plotW) * distSpan,
+      distMax: distMin + ((x2 - padL) / plotW) * distSpan,
+    });
+  }
+
+  function panToNearest(clientX) {
+    const dist = distAtClientX(clientX);
+    let closest = 0, minD = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(points[i].dist - dist);
+      if (d < minD) { minD = d; closest = i; }
+    }
+    map.panTo([points[closest].lat, points[closest].lon]);
+  }
+
+  const isTouchPointer = (e) => e.pointerType === 'touch' || e.pointerType === 'pen';
+
+  container.addEventListener('pointerdown', (e) => {
+    if (!isTouchPointer(e)) return;
+    lastTouchTs = performance.now();
+    if (e.target === resetBtn) return;
+    if (touchState || !e.isPrimary) return;
+    if (!inPlotArea(e.clientX, e.clientY)) return;
+    const rect = canvas.getBoundingClientRect();
+    touchState = {
+      id: e.pointerId,
+      startClientX: e.clientX,
+      startCanvasX: e.clientX - rect.left,
+      endCanvasX: null,
+      moved: false,
+    };
+    try { container.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+  });
+
+  container.addEventListener('pointermove', (e) => {
+    if (!isTouchPointer(e)) return;
+    lastTouchTs = performance.now();
+    if (!touchState || e.pointerId !== touchState.id) return;
+    const rect = canvas.getBoundingClientRect();
+    if (Math.abs(e.clientX - touchState.startClientX) < DRAG_THRESHOLD_PX && !touchState.moved) return;
+    touchState.moved = true;
+    hoverInfo.style.display = 'none';
+    const clamp = (x) => Math.max(profileParams.padL, Math.min(rect.width - profileParams.padR, x));
+    touchState.endCanvasX = clamp(e.clientX - rect.left);
+    positionOverlayFromPixels(clamp(touchState.startCanvasX), touchState.endCanvasX);
+  });
+
+  function endTouch(e, cancelled) {
+    if (!isTouchPointer(e)) return;
+    lastTouchTs = performance.now();
+    if (!touchState || e.pointerId !== touchState.id) return;
+    const st = touchState;
+    touchState = null;
+    selectionOverlay.style.display = 'none';
+    try { container.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    if (cancelled) return;
+    if (st.moved) {
+      commitSelection(st.startCanvasX, st.endCanvasX != null ? st.endCanvasX : st.startCanvasX);
+    } else if (showHoverAt(e.clientX)) {
+      panToNearest(e.clientX);
+    }
+  }
+  container.addEventListener('pointerup', (e) => endTouch(e, false));
+  container.addEventListener('pointercancel', (e) => endTouch(e, true));
+
+  // A touch outside the profile dismisses the pinned hover info.
+  document.addEventListener('pointerdown', (e) => {
+    if (!isTouchPointer(e)) return;
+    if (container.contains(e.target)) return;
+    hideHover();
+  }, true);
 
   // Cancel drag on Escape.
   window.addEventListener('keydown', (e) => {

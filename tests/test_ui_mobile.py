@@ -517,8 +517,6 @@ def _goto_analysis(page, server_url, rid):
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{server_url}/route/{rid}")
     page.wait_for_selector("#map .leaflet-tile-container", state="attached")
-    # Analysis mobile layout is Task 5; give #map a usable height meanwhile.
-    page.add_style_tag(content="#map{height:300px!important;min-height:300px!important;flex:none!important}")
     page.wait_for_timeout(800)
 
 
@@ -534,7 +532,7 @@ def test_analysis_long_press_map_opens_menu_and_marker(mobile_page, server_url):
         "#ctx-menu .ctx-item", "els => els.filter(e => e.offsetParent).map(e => e.getBoundingClientRect().height)")
     assert heights and min(heights) >= 44, heights
     page.once("dialog", lambda d: d.accept("L"))
-    page.locator("#ctx-add-waypoint").tap() if page.locator("#ctx-add-waypoint").count() else None
+    page.locator("#ctx-add-waypoint").tap()
     page.wait_for_timeout(500)
     assert page.locator(".waypoint-icon").count() == 1
     assert not page.locator("#ctx-menu").is_visible()
@@ -574,3 +572,154 @@ def test_tap_after_long_press_still_adds_waypoint(mobile_page, server_url):
     _touch_hold(mobile_page, x, y, ms=40)
     mobile_page.wait_for_timeout(500)
     assert _wp_count(server_url, rid) == 2
+
+
+# --- Task 5: Analysis page layout, legend, profile touch ---
+
+import os
+
+SAMPLE_GPX = os.path.join(os.path.dirname(__file__), "fixtures", "sample.gpx")
+
+
+def make_analysis_route(server_url, title="Analysis mobile"):
+    """Route with elevation data (fixtures/sample.gpx)."""
+    with open(SAMPLE_GPX, "rb") as f:
+        r = http_requests.post(f"{server_url}/api/routes",
+                               files={"file": ("sample.gpx", f)}, data={"title": title})
+    return r.json()["id"]
+
+
+def _goto_analysis_ready(page, server_url, rid, w=390, h=844):
+    page.set_viewport_size({"width": w, "height": h})
+    page.goto(f"{server_url}/route/{rid}")
+    page.wait_for_selector("#map .leaflet-tile-container", state="attached")
+    page.wait_for_selector("#legend .legend-item")
+    page.wait_for_timeout(800)
+
+
+def _profile_point(page, fx=0.5, fy=0.5):
+    page.locator("#profile-canvas").scroll_into_view_if_needed()
+    page.wait_for_timeout(200)
+    b = _box(page, "#profile-canvas")
+    return b["x"] + b["width"] * fx, b["y"] + b["height"] * fy
+
+
+def test_analysis_mobile_layout(mobile_page, server_url):
+    rid = make_analysis_route(server_url)
+    _goto_analysis_ready(mobile_page, server_url, rid)
+    m = _box(mobile_page, "#map")
+    p = mobile_page.evaluate(
+        "(() => { const r = document.querySelector('#profile-container').getBoundingClientRect();"
+        " return {top: r.top + scrollY, h: r.height}; })()")
+    mt = mobile_page.evaluate("document.querySelector('#map').getBoundingClientRect().top + scrollY")
+    vw = mobile_page.evaluate("document.documentElement.clientWidth")
+    assert abs(m["width"] - vw) <= 1, (m, vw)
+    assert m["height"] >= 200, m
+    assert 150 <= p["h"] <= 170, p
+    assert p["top"] >= mt + m["height"] - 1, (p, mt, m)
+    assert_no_hscroll(mobile_page)
+
+
+def test_legend_scrolls_horizontally(mobile_page, server_url):
+    rid = make_analysis_route(server_url)
+    _goto_analysis_ready(mobile_page, server_url, rid)
+    info = mobile_page.evaluate("""(() => {
+        const l = document.querySelector('#legend'); const s = getComputedStyle(l);
+        return {ox: s.overflowX, snap: s.scrollSnapType, sw: l.scrollWidth, cw: l.clientWidth,
+                items: l.querySelectorAll('.legend-item').length};
+    })()""")
+    assert info["ox"] == "auto", info
+    assert info["snap"] != "none", info
+    assert info["sw"] > info["cw"], info
+    # last control is reachable by scrolling the legend itself
+    mobile_page.evaluate("document.querySelector('#legend').scrollLeft = 1e6")
+    last = mobile_page.locator("#legend .legend-btn").last.bounding_box()
+    assert last["x"] + last["width"] <= 390 + 0.5, last
+    assert_no_hscroll(mobile_page)
+
+
+def test_profile_tap_pins_hover_info(mobile_page, server_url):
+    rid = make_analysis_route(server_url)
+    _goto_analysis_ready(mobile_page, server_url, rid)
+    x, y = _profile_point(mobile_page, 0.5, 0.5)
+    assert not mobile_page.locator("#hover-info").is_visible()
+    mobile_page.touchscreen.tap(x, y)
+    mobile_page.wait_for_timeout(300)
+    assert mobile_page.locator("#hover-info").is_visible()
+    assert mobile_page.locator("#hi-dist").inner_text().endswith("km")
+    # tap on the map dismisses it
+    mobile_page.evaluate("window.scrollTo(0, 0)")
+    mobile_page.wait_for_timeout(200)
+    mb = _box(mobile_page, "#map")
+    mobile_page.touchscreen.tap(mb["x"] + 40, mb["y"] + mb["height"] - 40)
+    mobile_page.wait_for_timeout(300)
+    assert not mobile_page.locator("#hover-info").is_visible()
+
+
+def test_profile_touch_drag_zoom(mobile_page, server_url):
+    rid = make_analysis_route(server_url)
+    _goto_analysis_ready(mobile_page, server_url, rid)
+    x1, y = _profile_point(mobile_page, 0.3, 0.5)
+    x2, _ = _profile_point(mobile_page, 0.7, 0.5)
+    assert not mobile_page.locator(".profile-reset-zoom").is_visible()
+    _touch_drag(mobile_page, x1, y, x2, y)
+    assert mobile_page.locator(".profile-reset-zoom").is_visible()
+    # no stray compat-mouse tap handling: hover info stays hidden after a drag
+    assert not mobile_page.locator("#hover-info").is_visible()
+
+
+def test_map_segment_tap_highlights_segment(mobile_page, server_url):
+    """Tapping a gradient segment highlights it (no mouseover on touch); tapping the map clears it."""
+    rid = make_analysis_route(server_url)
+    _goto_analysis_ready(mobile_page, server_url, rid)
+    # segments are hidden below 10% by default: reveal them all
+    mobile_page.locator("#legend .legend-btn", has_text="Show All").tap()
+    mobile_page.locator("#map").scroll_into_view_if_needed()
+    mobile_page.wait_for_timeout(400)
+    # a point on a gradient segment that is not covered by the open info panel
+    pt = mobile_page.evaluate("""(() => {
+        for (const p of document.querySelectorAll('#map path.leaflet-interactive[stroke-width="4"]')) {
+            const m = p.getScreenCTM(), L = p.getTotalLength();
+            for (const f of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+                const q = p.getPointAtLength(L * f);
+                const x = q.x * m.a + q.y * m.c + m.e, y = q.x * m.b + q.y * m.d + m.f;
+                // Chromium snaps taps to nearby targets: stay clear of markers/arrows
+                const near = [...document.querySelectorAll('#map polygon, #map .leaflet-marker-icon, #map .leaflet-control, #map-hover-panel')]
+                    .some(e => { const r = e.getBoundingClientRect();
+                        return x > r.left - 30 && x < r.right + 30 && y > r.top - 30 && y < r.bottom + 30; });
+                if (!near && document.elementFromPoint(x, y) === p) return [x, y];
+            }
+        }
+        return null; })()""")
+    assert pt, "no tappable segment point"
+    mobile_page.touchscreen.tap(*pt)
+    mobile_page.wait_for_timeout(400)
+    widths = mobile_page.eval_on_selector_all(
+        "#map path.leaflet-interactive", "els => els.map(e => e.getAttribute('stroke-width'))")
+    assert "7" in widths, widths
+    # tapping empty map dismisses the highlight
+    mb = _box(mobile_page, "#map")
+    mobile_page.touchscreen.tap(mb["x"] + 8, mb["y"] + mb["height"] - 8)
+    mobile_page.wait_for_timeout(400)
+    widths = mobile_page.eval_on_selector_all(
+        "#map path.leaflet-interactive", "els => els.map(e => e.getAttribute('stroke-width'))")
+    assert "7" not in widths, widths
+
+
+def test_analysis_no_overflow_long_track_name_360(mobile_page, server_url):
+    rid = make_analysis_route(server_url, title="T" * 90 + " " + "U" * 70)
+    _goto_analysis_ready(mobile_page, server_url, rid, w=360, h=740)
+    assert_no_hscroll(mobile_page)
+    bad = mobile_page.evaluate("""(() => {
+        const out = [];
+        for (const sel of ['#header', '#stats', '#settings-bar', '#main', '#profile-container', '#legend', 'body']) {
+            const e = document.querySelector(sel);
+            if (e && sel !== '#legend' && e.scrollWidth > e.clientWidth) out.push([sel, e.scrollWidth, e.clientWidth]);
+        }
+        for (const e of document.querySelectorAll('#header *, #stats *, #settings-bar *, #main-nav *')) {
+            const r = e.getBoundingClientRect();
+            if (r.width && r.right > innerWidth + 0.5) out.push([e.id || e.className || e.tagName, r.right]);
+        }
+        return out;
+    })()""")
+    assert not bad, bad
