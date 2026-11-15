@@ -56,6 +56,31 @@ def set_category_tags(user_id, category_id, tag_names):
     db.commit()
 
 
+def set_bookmark_tags(user_id, bookmark_id, tag_names):
+    db = get_db()
+    owned = db.execute(
+        "SELECT 1 FROM bookmarks WHERE id = ? AND user_id = ?", (bookmark_id, user_id)
+    ).fetchone()
+    if not owned:
+        return
+    db.execute("DELETE FROM bookmark_tags WHERE bookmark_id = ?", (bookmark_id,))
+    seen = set()
+    for name in tag_names:
+        name_lower = name.lower()
+        if name_lower in seen:
+            continue
+        seen.add(name_lower)
+        tag = _get_or_create_tag(user_id, name)
+        db.execute(
+            "INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)",
+            (bookmark_id, tag["id"]),
+        )
+    db.execute(
+        "UPDATE bookmarks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (bookmark_id,)
+    )
+    db.commit()
+
+
 def get_tags_with_counts(user_id):
     db = get_db()
     rows = db.execute(
@@ -70,6 +95,11 @@ def get_tags_with_counts(user_id):
                    SELECT COUNT(*) FROM category_tags ct
                    JOIN categories c ON c.id = ct.category_id
                    WHERE ct.tag_id = t.id AND c.user_id = t.user_id
+               ) +
+               (
+                   SELECT COUNT(*) FROM bookmark_tags bt
+                   JOIN bookmarks b ON b.id = bt.bookmark_id
+                   WHERE bt.tag_id = t.id AND b.user_id = t.user_id
                ) AS usage_count
         FROM tags t
         WHERE t.user_id = ?
@@ -110,7 +140,28 @@ def get_category_tags(user_id, category_id):
     return [dict(row) for row in rows]
 
 
+def get_bookmark_tags(user_id, bookmark_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT t.* FROM tags t
+        JOIN bookmark_tags bt ON bt.tag_id = t.id
+        JOIN bookmarks b ON b.id = bt.bookmark_id
+        WHERE bt.bookmark_id = ? AND b.user_id = ?
+        ORDER BY t.name_lower
+        """,
+        (bookmark_id, user_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def delete_tag(user_id, tag_id):
     db = get_db()
+    # Explicit join-table cleanup (cascade also covers this when FKs are on).
+    db.execute(
+        "DELETE FROM bookmark_tags WHERE tag_id IN "
+        "(SELECT id FROM tags WHERE user_id = ? AND id = ?)",
+        (user_id, tag_id),
+    )
     db.execute("DELETE FROM tags WHERE user_id = ? AND id = ?", (user_id, tag_id))
     db.commit()

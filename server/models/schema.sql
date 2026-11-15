@@ -96,3 +96,36 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
     display_name TEXT,
     created_at   INTEGER NOT NULL
 );
+
+-- M8: bookmarks (per-user reusable locations)
+CREATE TABLE IF NOT EXISTS bookmarks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL UNIQUE,
+    user_id     TEXT    NOT NULL DEFAULT 'anonymous',
+    name        TEXT    NOT NULL,
+    description TEXT    DEFAULT '',
+    lat         REAL    NOT NULL,
+    lon         REAL    NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id);
+
+CREATE TABLE IF NOT EXISTS bookmark_tags (
+    bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+    tag_id      INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (bookmark_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS bookmark_photos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    bookmark_id   INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+    position      INTEGER NOT NULL,
+    storage_name  TEXT    NOT NULL,
+    mime_type     TEXT    NOT NULL,
+    byte_size     INTEGER NOT NULL,
+    caption       TEXT    DEFAULT '',
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(bookmark_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_bookmark_photos_bookmark ON bookmark_photos(bookmark_id);
