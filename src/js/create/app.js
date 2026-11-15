@@ -21,6 +21,7 @@ import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
 import { openCsvImport } from '../shared/csv-import.js';
 import { initAddressSearch } from './address-search.js';
+import { mountBookmarkPicker } from '../shared/bookmark-picker.js';
 import { initBottomSheet } from './bottom-sheet.js';
 
 // Leading-edge debounce semantics:
@@ -1248,7 +1249,7 @@ async function main() {
   });
 
   // Add by address: append a stop at the picked geocode result.
-  initAddressSearch({
+  const addressSearch = initAddressSearch({
     input: document.getElementById('add-address'),
     list: document.getElementById('address-suggestions'),
     status: document.getElementById('address-status'),
@@ -1258,6 +1259,35 @@ async function main() {
       state.map.panTo([lat, lon]);
     },
   });
+
+  // Bookmarks picker: the route always exists by now (ensureRouteId at
+  // startup). There is no persistent selected-leg state (a plain press on a
+  // leg already starts a line-drag insert), so the picker carries its own
+  // "Insert:" select; each choice is the position after a current waypoint.
+  const addressInput = document.getElementById('add-address');
+  const bookmarkPicker = mountBookmarkPicker({
+    button: document.getElementById('btn-bookmarks'),
+    container: document.getElementById('bookmark-picker'),
+    getRouteId: () => state.routeId,
+    getInsertPosition: () => null,
+    getInsertChoices: () => state.waypoints.map((w, i) => ({
+      label: `After ${w.name || (w.kind === 'stop' ? 'Stop' : 'Waypoint')}`,
+      position: i + 1,
+    })),
+    getMapCenter: () => state.map.getCenter(),
+    onAdded: async (wp) => {
+      await onWaypointsChanged(state, editor);
+      if (wp && wp.lat != null && wp.lon != null) state.map.panTo([wp.lat, wp.lon]);
+    },
+  });
+  // Only one of address suggestions / bookmark picker open at a time.
+  document.getElementById('btn-bookmarks').addEventListener('click', () => {
+    if (bookmarkPicker.isOpen()) {
+      addressSearch.dismiss();
+    }
+  });
+  addressInput.addEventListener('input', () => bookmarkPicker.close());
+  addressInput.addEventListener('focus', () => bookmarkPicker.close());
 
   // Dropdown arrow toggles the menu.
   document.getElementById('btn-gen-dropdown').addEventListener('click', (e) => {

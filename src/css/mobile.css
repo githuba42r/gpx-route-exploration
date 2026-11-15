@@ -116,6 +116,18 @@
     transform: translate(-50%, -50%);
   }
   label[for="route-round-trip"] { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+
+  /* Bookmark picker: full-width panel above the sheet (Leaflet controls 1000,
+     pin menu 1200, address suggestions 2000). */
+  #bookmarks-wrap { position: static; }
+  #btn-bookmarks .bp-btn-label { display: none; }
+  #bookmark-picker {
+    position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto; margin: 0;
+    width: auto; max-width: none; max-height: 70dvh; z-index: 2100;
+  }
+  #bookmark-picker .bp-row { min-height: 56px; }
+  #bookmark-picker .bp-tag { min-height: 44px; padding: 0 14px; }
+  #bookmark-picker .bp-search, #bookmark-picker .bp-insert { min-height: 44px; }
 }
 
 /* Landscape phones / short viewports: side-by-side map + list, no sheet. */

@@ -72,3 +72,10 @@ export function patchRouteOptions(routeId, patch) {
 export function optimiseRoute(routeId) {
   return json('POST', `/api/routes/${routeId}/optimise`);
 }
+
+export function addWaypointFromBookmark(routeId, { bookmark_id, position, kind }) {
+  const body = { bookmark_id };
+  if (position != null) body.position = position;
+  if (kind) body.kind = kind;
+  return json('POST', `/api/routes/${routeId}/waypoints/from-bookmark`, body);
+}

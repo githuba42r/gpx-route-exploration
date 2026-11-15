@@ -128,4 +128,7 @@ export function initAddressSearch({ input, list, status, onSelect }) {
       setStatus('');
     }
   });
+
+  // Lets sibling popovers dismiss the suggestions without a synthetic key event.
+  return { dismiss() { cancelPending(); clear(); setStatus(''); } };
 }
