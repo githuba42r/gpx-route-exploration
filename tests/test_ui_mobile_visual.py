@@ -69,7 +69,10 @@ def vpage(playwright, vis_server):
 
 
 def _shot(page, extra_masks=()):
-    page.wait_for_load_state("networkidle")
+    try:  # best effort; a stalled external request must not fail the shot
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        pass
     page.add_style_tag(content=FREEZE_CSS)
     page.evaluate("document.fonts.ready")
     page.wait_for_timeout(600)
@@ -106,6 +109,7 @@ def _compare(png_bytes, name, tmp_path):
 def test_visual_library(vpage, vis_server, tmp_path):
     for t in ("Alpha loop", "Bravo ridge", "Charlie coast"):
         make_route(vis_server, title=t)
+        time.sleep(1.1)  # uploaded_at has 1s resolution; keep the card order fixed
     vpage.goto(f"{vis_server}/")
     vpage.wait_for_timeout(800)
     _compare(_shot(vpage), "library", tmp_path)
