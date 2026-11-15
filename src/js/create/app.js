@@ -19,6 +19,7 @@ import { onLongPress, longPressJustFired } from '../shared/long-press.js';
 import { mountWaypointEditor } from '../shared/waypoint-editor.js';
 import { decodePolyline } from '../shared/polyline.js';
 import * as api from '../shared/route-api.js';
+import { saveBookmarkFromWaypoint } from '../shared/bookmark-save.js';
 import { openCsvImport } from '../shared/csv-import.js';
 import { initAddressSearch } from './address-search.js';
 import { mountBookmarkPicker } from '../shared/bookmark-picker.js';
@@ -320,6 +321,7 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
     <button data-act="toggle-include" type="button">${included ? 'Exclude from route' : 'Include in route'}</button>
     ${linkEntry}
     ${isStop ? '<button data-act="edit-stop" type="button">Edit stop details…</button>' : ''}
+    <button data-act="save-bookmark" type="button">Save as bookmark</button>
     <div class="ctx-sep"></div>
     <button data-act="delete" type="button" class="danger">Delete</button>
   `;
@@ -393,6 +395,8 @@ function openPinContextMenu(state, editor, w, leafletEvt) {
         await onWaypointsChanged(state, editor);
       } else if (act === 'edit-stop') {
         openStopEditModal(state, editor, w);
+      } else if (act === 'save-bookmark') {
+        saveBookmarkFromWaypoint(w.id);
       }
     });
   });

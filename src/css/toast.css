@@ -1,0 +1,17 @@
+/* Transient toast: above the pin menu (1200), suggestions (2000), picker (2100),
+   CSV dialog (3000). Bottom-centre on desktop; top-centre on phones so the
+   bottom sheet never covers it. */
+.app-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 3500; display: flex; align-items: center; gap: 12px;
+  max-width: min(92vw, 520px); box-sizing: border-box;
+  background: #16213e; color: #e0e0e0; border: 1px solid #0f3460;
+  border-radius: 6px; padding: 10px 12px 10px 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5); font-size: 0.9em;
+}
+.app-toast-msg { overflow-wrap: anywhere; min-width: 0; }
+.app-toast-link { color: #00e5ff; font-weight: 600; text-decoration: underline; }
+.app-toast-close {
+  background: none; border: none; color: #e0e0e0; font-size: 1.3em; line-height: 1;
+  cursor: pointer; padding: 2px 6px;
+}

@@ -6,6 +6,7 @@ import { storageKey } from './storage.js';
 import { showGradientModal, closeGradientModal } from './gradient-modal.js';
 import { initTerrainGradient } from './terrain-gradient.js';
 import { onLongPress } from '../shared/long-press.js';
+import { saveBookmarkPoint } from '../shared/bookmark-save.js';
 
 /**
  * Shared context-menu state passed to modal sub-modules.
@@ -81,6 +82,7 @@ export function initContextMenu(map, points, gradSectionsRef) {
   const ctxMenu = document.getElementById('ctx-menu');
   const ctxAddWaypoint = document.getElementById('ctx-add-waypoint');
   const ctxRemoveWaypoint = document.getElementById('ctx-remove-waypoint');
+  const ctxSaveBookmark = document.getElementById('ctx-save-bookmark');
   const ctxGradInfo = document.getElementById('ctx-grad-info');
 
   // --- Context menu display ---
@@ -98,6 +100,7 @@ export function initContextMenu(map, points, gradSectionsRef) {
     ctxMenu.style.display = 'none';
     shared.ctxTargetWaypoint = null;
     ctxRemoveWaypoint.style.display = 'none';
+    ctxSaveBookmark.style.display = 'none';
   }
 
   // --- Waypoint management ---
@@ -171,6 +174,7 @@ export function initContextMenu(map, points, gradSectionsRef) {
       shared.ctxLatLng = e.latlng;
       shared.ctxNearestIdx = findNearestPoint(points, e.latlng);
       ctxRemoveWaypoint.style.display = '';
+      ctxSaveBookmark.style.display = '';
       showCtxMenu(e.originalEvent);
     };
     marker.on('contextmenu', (e) => {
@@ -204,6 +208,7 @@ export function initContextMenu(map, points, gradSectionsRef) {
     shared.ctxNearestIdx = findNearestPoint(points, e.latlng);
     shared.ctxTargetWaypoint = null;
     ctxRemoveWaypoint.style.display = 'none';
+    ctxSaveBookmark.style.display = 'none';
     showCtxMenu(e.originalEvent);
   };
   map.on('contextmenu', (e) => {
@@ -230,6 +235,15 @@ export function initContextMenu(map, points, gradSectionsRef) {
   ctxRemoveWaypoint.addEventListener('click', () => {
     if (shared.ctxTargetWaypoint) {
       removeWaypoint(shared.ctxTargetWaypoint);
+    }
+    hideCtxMenu();
+  });
+
+  ctxSaveBookmark.addEventListener('click', () => {
+    const m = shared.ctxTargetWaypoint;
+    if (m) {
+      const ll = m.getLatLng();
+      saveBookmarkPoint({ name: m._wpLabel, lat: ll.lat, lon: ll.lng });
     }
     hideCtxMenu();
   });

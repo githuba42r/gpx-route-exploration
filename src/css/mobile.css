@@ -128,6 +128,10 @@
   #bookmark-picker .bp-row { min-height: 56px; }
   #bookmark-picker .bp-tag { min-height: 44px; padding: 0 14px; }
   #bookmark-picker .bp-search, #bookmark-picker .bp-insert { min-height: 44px; }
+
+  /* Toast: top-centre so the bottom sheet can never cover it. */
+  .app-toast { bottom: auto; top: 60px; min-height: 44px; }
+  .app-toast-link, .app-toast-close { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 
 /* Landscape phones / short viewports: side-by-side map + list, no sheet. */

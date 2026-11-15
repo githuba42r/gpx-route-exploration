@@ -34,6 +34,7 @@ Open [http://localhost:5000](http://localhost:5000).
 | `FLASK_PORT` | `5000` | Port the application listens on |
 | `FLASK_SECRET_KEY` | `dev-secret-change-me` | Flask session secret — **change in production** |
 | `AUTH_USER_HEADER` | `Remote-User` | HTTP header that carries the authenticated username |
+| `BOOKMARK_PHOTO_MAX_BYTES` | `10485760` | Maximum size of a single bookmark photo upload (10 MB) |
 | `BACKUP_ENABLED` | `true` | Enable or disable the automated backup scheduler |
 | `BACKUP_INTERVAL_HOURS` | `1` | How frequently (in hours) to attempt a backup |
 | `BACKUP_DAILY_KEEP` | `7` | Number of daily backups to retain before promoting |
@@ -203,6 +204,15 @@ For Playwright browser UI tests, install the Chromium browser before running:
 playwright install chromium
 pytest tests/
 ```
+
+## Bookmarks
+
+Bookmarks are saved places (name, description, coordinates, tags and photos) that you can reuse across routes. They are **per-user** — each user sees only their own — and there is no system-wide bookmark list.
+
+- **Library** — the Bookmarks tab (`/#bookmarks`) lets you create, search, tag, edit and delete bookmarks and manage their photos. Tags work like route tags.
+- **Create page** — the bookmark picker lists your bookmarks nearest-first (with search and tag filters) and adds one to the route as a waypoint, optionally at a chosen insert position.
+- **Save as bookmark** — right-click (or long-press on touch) a waypoint/stop marker on the Create page, or a waypoint marker on the Analysis page, and choose *Save as bookmark*. A toast confirms with a link to the Bookmarks tab. On Create the waypoint's name, description and position are copied; on Analysis the marker's label and position are saved.
+- **Photos** — JPEG, PNG or WebP, up to 10 MB each by default (set `BOOKMARK_PHOTO_MAX_BYTES` to change it). Uploads are validated and thumbnails are generated, which requires [Pillow](https://pypi.org/project/Pillow/) (included in `requirements.txt`). Files are stored under `<DATA_DIR>/bookmarks/<user>/<uuid>/` and removed when the bookmark is deleted.
 
 ## Backup System
 
