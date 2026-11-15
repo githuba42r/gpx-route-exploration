@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, jsonify, request
 from server.auth import get_current_user
 from server.models.routes import get_route
 from server.models import waypoints as wp_model
+from server.models.bookmarks import get_bookmark
 
 bp = Blueprint("api_waypoints", __name__, url_prefix="/api")
 
@@ -62,6 +63,45 @@ def append_waypoint(route_id):
             )
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+    return jsonify(wp), 201
+
+
+@bp.route("/routes/<int:route_id>/waypoints/from-bookmark", methods=["POST"])
+def add_from_bookmark(route_id):
+    """Add a copy of one of the user's bookmarks as a waypoint (no live link)."""
+    _, err = _require_route(route_id)
+    if err:
+        return err
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    bookmark_id = data.get("bookmark_id")
+    if isinstance(bookmark_id, bool) or not isinstance(bookmark_id, int):
+        return jsonify({"error": "bookmark_id must be an integer"}), 400
+    kind = data.get("kind", "stop")
+    if kind not in VALID_KINDS:
+        return jsonify({"error": "kind must be 'stop' or 'waypoint'"}), 400
+    count = len(wp_model.list_waypoints(route_id))
+    position = data.get("position")
+    if position is not None:
+        if isinstance(position, bool) or not isinstance(position, int) \
+                or not 0 <= position <= count:
+            return jsonify(
+                {"error": f"position must be an integer between 0 and {count}"}
+            ), 400
+    bookmark = get_bookmark(get_current_user(), bookmark_id)
+    if bookmark is None:
+        return jsonify({"error": "Not found"}), 404
+    common = dict(
+        name=bookmark["name"],
+        lat=bookmark["lat"],
+        lon=bookmark["lon"],
+        kind=kind,
+        description=bookmark.get("description"),
+    )
+    if position is None:
+        wp = wp_model.append_waypoint(route_id, **common)
+    else:
+        wp = wp_model.insert_waypoint_at(route_id, position=position, **common)
     return jsonify(wp), 201
 
 
