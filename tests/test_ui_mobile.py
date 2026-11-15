@@ -734,3 +734,133 @@ def test_analysis_no_overflow_long_track_name_360(mobile_page, server_url):
         return out;
     })()""")
     assert not bad, bad
+
+
+# --- Final-review fix wave (I1-I6) ---
+
+def _set_sheet(page, state):
+    page.evaluate(f"document.getElementById('editor-panel').dataset.sheet = '{state}'")
+    page.wait_for_timeout(600)
+
+
+def test_full_sheet_covers_leaflet_controls(mobile_page, server_url):
+    """I1: Leaflet controls (z-index 1000) must not paint over the full sheet."""
+    rid = make_route(server_url, n_waypoints=3)
+    _goto_create(mobile_page, server_url, rid)
+    _set_sheet(mobile_page, "full")
+    hb = _box(mobile_page, ".sheet-handle")
+    tb = mobile_page.locator(".wpe-tab").first.bounding_box()
+    pb = _box(mobile_page, "#editor-panel")
+    for x, y in [(hb["x"] + 20, hb["y"] + 15),          # zoom control zone
+                 (tb["x"] + 20, tb["y"] + tb["height"] / 2),
+                 (pb["x"] + pb["width"] - 20, pb["y"] + pb["height"] - 6)]:  # attribution zone
+        inside = mobile_page.evaluate(
+            "([x, y]) => { const e = document.elementFromPoint(x, y);"
+            " return !!(e && e.closest('#editor-panel')); }", [x, y])
+        assert inside, f"point ({x},{y}) is covered by something outside #editor-panel"
+
+
+def test_create_landscape_map_usable(mobile_page, server_url):
+    """I2: at 844x390 the map must not collapse to a sliver."""
+    rid = make_route(server_url, n_waypoints=3)
+    _goto_create(mobile_page, server_url, rid, w=844, h=390)
+    m = _box(mobile_page, "#map")
+    p = _box(mobile_page, "#editor-panel")
+    assert m["height"] >= 200, m
+    assert p["height"] >= 100, p
+    assert not mobile_page.locator(".sheet-handle").is_visible()
+    assert_no_hscroll(mobile_page)
+
+
+def test_create_short_portrait_half_sheet_shows_list(mobile_page, server_url):
+    """I2: at 390x664 the half sheet shows at least ~1.5 list rows."""
+    rid = make_route(server_url, n_waypoints=4)
+    _goto_create(mobile_page, server_url, rid, w=390, h=664)
+    assert _sheet(mobile_page) == "half"
+    lb = _box(mobile_page, ".wpe-list")
+    pb = _box(mobile_page, "#editor-panel")
+    vis_h = min(lb["y"] + lb["height"], pb["y"] + pb["height"]) - lb["y"]
+    assert vis_h >= 90, (lb, pb)
+    assert _box(mobile_page, "#map")["height"] >= 140
+
+
+def test_tap_map_dismisses_pin_menu_without_adding(mobile_page, server_url):
+    """I3: the tap that dismisses the pin menu must not also drop a waypoint."""
+    rid = make_route(server_url, n_waypoints=2)
+    _goto_create(mobile_page, server_url, rid)
+    x, y = _marker_center(mobile_page, 0)
+    _touch_hold(mobile_page, x, y, ms=700)
+    assert mobile_page.locator("#pin-ctx-menu").is_visible()
+    ex, ey = _empty_map_point(mobile_page)
+    _touch_hold(mobile_page, ex, ey, ms=40)
+    mobile_page.wait_for_timeout(500)
+    assert not mobile_page.locator("#pin-ctx-menu").is_visible()
+    assert _wp_count(server_url, rid) == 2
+
+
+def _hit_expanded(page, sel, reach=21):
+    """True if points `reach` px from the element centre in 4 directions still hit it
+    (i.e. its effective hit area incl. ::after is >= 2*reach)."""
+    return page.evaluate("""([sel, r]) => {
+      const el = document.querySelector(sel); if (!el) return null;
+      const b = el.getBoundingClientRect(); const cx = b.left + b.width/2, cy = b.top + b.height/2;
+      return [[r-1,0],[-(r-1),0],[0,r-1],[0,-(r-1)]].every(([dx,dy]) => {
+        const e = document.elementFromPoint(cx+dx, cy+dy); return e === el || (e && el.contains(e)); });
+    }""", [sel, reach])
+
+
+def test_tap_targets_widened(mobile_page, server_url):
+    """I5. Measured by bounding box (links, tabs, handles, zoom, labels, headers) and,
+    for map markers, by elementFromPoint 21px from the centre (their 44px ::after
+    hit-area is not part of getBoundingClientRect)."""
+    rid = make_route(server_url, n_waypoints=3, title="Targets")
+    page = mobile_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{server_url}/")
+    page.wait_for_selector(".category-header")
+    for sel in ["#main-nav a", ".category-header"]:
+        hs = page.eval_on_selector_all(sel, "els => els.filter(e => e.offsetParent).map(e => e.getBoundingClientRect().height)")
+        assert hs and min(hs) >= 43.5, (sel, hs)
+    page.goto(f"{server_url}/route/{rid}")
+    page.wait_for_timeout(1200)
+    hs = page.eval_on_selector_all("#main-nav a, #btn-open-edit", "els => els.filter(e => e.offsetParent).map(e => e.getBoundingClientRect().height)")
+    assert hs and min(hs) >= 43.5, hs
+    _goto_create(page, server_url, rid)
+    _set_sheet(page, "full")
+    for sel in ["#main-nav a", ".wpe-tab", ".wpe-handle",
+                ".leaflet-control-zoom a", "label[for=route-round-trip]"]:
+        if sel == "label[for=route-round-trip]":
+            page.click("#btn-header-more")
+            page.wait_for_timeout(300)
+        boxes = page.eval_on_selector_all(
+            sel, "els => els.filter(e => e.offsetParent || e.getClientRects().length).map(e => {const r=e.getBoundingClientRect(); return [r.width, r.height];})")
+        assert boxes, sel
+        assert all(w >= 43.5 and h >= 43.5 for w, h in boxes) or sel == "#main-nav a" and all(h >= 43.5 for _, h in boxes), (sel, boxes)
+    _set_sheet(page, "peek")
+    assert _hit_expanded(page, ".leaflet-marker-icon.leaflet-interactive"), "waypoint/stop marker hit area < 44px"
+
+
+def test_sortable_touch_reorder_via_handle(mobile_page, server_url):
+    """I6: touch-drag a ⋮⋮ handle below the next row reorders waypoints (full sheet)."""
+    rid = make_route(server_url, n_waypoints=4)
+    page = mobile_page
+    _goto_create(page, server_url, rid)
+    _set_sheet(page, "full")
+    before = [w["name"] for w in http_requests.get(f"{server_url}/api/routes/{rid}/waypoints").json()]
+    hs = page.evaluate("[...document.querySelectorAll('.wpe-handle')].map(h => {const r = h.getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2];})")
+    (x0, y0), (x1, y1) = hs[0], hs[1]
+    ty = y1 + 30
+    cdp = page.context.new_cdp_session(page)
+    def tp(kind, pts):
+        cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": [{"x": x, "y": y} for x, y in pts]})
+    tp("touchStart", [(x0, y0)])
+    for i in range(1, 21):
+        page.wait_for_timeout(20)
+        tp("touchMove", [(x0, y0 + (ty - y0) * i / 20)])
+    page.wait_for_timeout(100)
+    tp("touchEnd", [])
+    cdp.detach()
+    page.wait_for_timeout(1200)
+    after = [w["name"] for w in http_requests.get(f"{server_url}/api/routes/{rid}/waypoints").json()]
+    assert before == ["WP0", "WP1", "WP2", "WP3"], before
+    assert after != before and after.index("WP0") > 0, after

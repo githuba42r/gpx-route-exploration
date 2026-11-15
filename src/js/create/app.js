@@ -1285,6 +1285,10 @@ async function main() {
   onLongPress(state.map, () => {});
   state.map.on('click', async (e) => {
     if (longPressJustFired()) return;  // click synthesised after a long-press
+    // A tap that dismisses the pin context menu must not also drop a waypoint
+    // (the document click listener closes the menu).
+    const pinMenu = document.getElementById('pin-ctx-menu');
+    if (pinMenu && pinMenu.style.display !== 'none' && pinMenu.style.display !== '') return;
     const n = ++state.clickCounter;
     // Ctrl+click (or Cmd+click on macOS) drops a stop, plain click drops a
     // waypoint. Keeps single-click fast for route shaping and makes the

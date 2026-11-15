@@ -12,12 +12,14 @@ import time
 
 import pytest
 import requests as http_requests
-from PIL import Image, ImageChops
+
+Image = pytest.importorskip("PIL.Image")
+ImageChops = pytest.importorskip("PIL.ImageChops")
 
 from test_ui_mobile import make_route
 
 SNAP_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "mobile-screenshots")
-THRESHOLD = 0.01  # fraction of differing pixels
+THRESHOLD = 0.002  # fraction of differing pixels
 FREEZE_CSS = (
     "*,*::before,*::after{transition:none!important;animation:none!important;"
     "caret-color:transparent!important}"
@@ -53,7 +55,9 @@ def vis_server(tmp_path_factory):
 def vpage(playwright, vis_server):
     device = playwright.devices["iPhone 13"]
     browser = playwright.chromium.launch()
-    context = browser.new_context(**device)
+    context = browser.new_context(**device, locale="en-GB", timezone_id="Australia/Brisbane")
+    # Never depend on the network: tiles (masked anyway) can stall "networkidle".
+    context.route(lambda u: "tile" in u.split("/")[2], lambda r: r.abort())
     # Never depend on live geocoding/routing.
     context.route("**/api/geocode*", lambda r: r.abort())
     context.route("**/api/route/**", lambda r: r.abort())
@@ -69,7 +73,7 @@ def _shot(page, extra_masks=()):
     page.add_style_tag(content=FREEZE_CSS)
     page.evaluate("document.fonts.ready")
     page.wait_for_timeout(600)
-    masks = [page.locator("#map")] + [page.locator(s) for s in extra_masks]
+    masks = [page.locator(s) for s in ("#map", ".meta-val", *extra_masks)]
     return page.screenshot(mask=masks, mask_color="#808080", animations="disabled")
 
 
