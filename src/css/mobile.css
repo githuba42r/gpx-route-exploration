@@ -120,6 +120,7 @@
   /* Bookmark picker: full-width panel above the sheet (Leaflet controls 1000,
      pin menu 1200, address suggestions 2000). */
   #bookmarks-wrap { position: static; }
+  #btn-bookmarks { min-height: 44px; }
   #btn-bookmarks .bp-btn-label { display: none; }
   #bookmark-picker {
     position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto; margin: 0;

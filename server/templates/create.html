@@ -39,12 +39,6 @@
   <button id="btn-optimise" type="button" title="Reorder stops for shortest route — respects pins + linked waypoints">Optimise</button>
   </div>
 
-  <span id="bookmarks-wrap">
-    <button id="btn-bookmarks" type="button" aria-haspopup="dialog" aria-expanded="false"
-            title="Add a saved bookmark to this route" aria-label="Bookmarks">&#9733;<span class="bp-btn-label"> Bookmarks</span></button>
-    <div id="bookmark-picker" hidden></div>
-  </span>
-
   <!-- Single split-button for everything Generate-related. The primary
        button's appearance changes with state (manual / ready / debounce /
        busy / rate). The dropdown arrow opens a context-appropriate menu. -->
@@ -90,6 +84,11 @@
 <div id="address-bar">
   <input id="add-address" type="text" placeholder="Add by address…" autocomplete="off"
          aria-label="Add a stop by address">
+  <span id="bookmarks-wrap">
+    <button id="btn-bookmarks" type="button" aria-haspopup="dialog" aria-expanded="false"
+            title="Add a saved bookmark to this route" aria-label="Bookmarks">&#9733;<span class="bp-btn-label"> Bookmarks</span></button>
+    <div id="bookmark-picker" hidden></div>
+  </span>
   <span id="address-status" aria-live="polite"></span>
   <ul id="address-suggestions" role="listbox"></ul>
 </div>

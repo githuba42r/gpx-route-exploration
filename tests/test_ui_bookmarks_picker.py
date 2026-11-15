@@ -257,3 +257,31 @@ def test_opening_one_closes_the_other(page, server_url):
     page.locator("#add-address").fill("Queen Stree")
     expect(page.locator("#address-suggestions li")).to_have_count(1)
     expect(page.locator("#bookmark-picker")).to_be_hidden()
+
+
+# --- M8 fix wave I2: toolbar layout unaffected by the Bookmarks button ---
+
+def test_toolbar_generate_not_clipped_desktop(page, server_url):
+    rid = make_route(server_url)
+    open_create(page, server_url, rid, 1280, 800)
+    r = page.evaluate("""() => {
+        const btn = document.getElementById('btn-gen-primary');
+        const lab = document.getElementById('gen-primary-label');
+        const rng = document.createRange(); rng.selectNodeContents(lab);
+        const t = rng.getBoundingClientRect(), b = btn.getBoundingClientRect();
+        return {text: lab.textContent, tr: t.right, br: b.right, tw: t.width,
+                inAddr: !!document.querySelector('#address-bar #btn-bookmarks'),
+                inHdr: !!document.querySelector('#create-header #btn-bookmarks')};
+    }""")
+    assert r["text"] == "Generate Now" and r["tw"] > 40 and r["tr"] <= r["br"] + 0.5, r
+    assert r["inAddr"] and not r["inHdr"]
+
+
+def test_save_on_same_row_as_generate_at_360(page, server_url):
+    rid = make_route(server_url)
+    open_create(page, server_url, rid, 360, 740)
+    g = page.locator("#btn-gen-primary").bounding_box()
+    s = page.locator("#btn-save").bounding_box()
+    assert abs(g["y"] - s["y"]) <= 4, (g, s)
+    m = page.locator("#map").bounding_box()
+    assert 205 <= m["height"] <= 220, m

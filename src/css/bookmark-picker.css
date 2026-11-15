@@ -1,5 +1,9 @@
 /* Create-page bookmark picker (M8) */
 #bookmarks-wrap { position: relative; display: inline-block; }
+#btn-bookmarks {
+  background:#0f3460; color:#e6edf5; border:1px solid #2b3650;
+  padding:5px 10px; border-radius:4px; cursor:pointer; font-size:0.8em;
+}
 #bookmark-picker {
   position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 2000;
   width: 360px; max-width: 92vw; max-height: 60vh; overflow-y: auto; box-sizing: border-box;
