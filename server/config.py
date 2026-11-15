@@ -15,3 +15,4 @@ class Config:
     NOMINATIM_RATE_LIMIT_MS = int(os.environ.get("NOMINATIM_RATE_LIMIT_MS", "1000"))
     CSV_MAX_BYTES = int(os.environ.get("CSV_MAX_BYTES", str(1024 * 1024)))
     CSV_MAX_ROWS = int(os.environ.get("CSV_MAX_ROWS", "200"))
+    BOOKMARK_PHOTO_MAX_BYTES = int(os.environ.get("BOOKMARK_PHOTO_MAX_BYTES", str(10 * 1024 * 1024)))
