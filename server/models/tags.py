@@ -76,7 +76,8 @@ def set_bookmark_tags(user_id, bookmark_id, tag_names):
             (bookmark_id, tag["id"]),
         )
     db.execute(
-        "UPDATE bookmarks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (bookmark_id,)
+        "UPDATE bookmarks SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+        (bookmark_id, user_id),
     )
     db.commit()
 

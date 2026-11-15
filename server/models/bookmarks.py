@@ -77,7 +77,7 @@ def list_bookmarks(user_id):
     ).fetchall()
     tag_rows = db.execute(
         """
-        SELECT bt.bookmark_id, t.name FROM bookmark_tags bt
+        SELECT bt.bookmark_id, t.* FROM bookmark_tags bt
         JOIN tags t ON t.id = bt.tag_id
         JOIN bookmarks b ON b.id = bt.bookmark_id
         WHERE b.user_id = ? ORDER BY t.name_lower
@@ -86,7 +86,8 @@ def list_bookmarks(user_id):
     ).fetchall()
     tags = {}
     for r in tag_rows:
-        tags.setdefault(r["bookmark_id"], []).append(r["name"])
+        d = dict(r)
+        tags.setdefault(d.pop("bookmark_id"), []).append(d)
     out = []
     for r in rows:
         d = dict(r)

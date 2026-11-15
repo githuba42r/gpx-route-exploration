@@ -1,5 +1,4 @@
 import math
-import time
 
 import pytest
 
@@ -51,7 +50,7 @@ def test_tags_replace_and_cascade(app):
     tag_model.set_bookmark_tags("u1", b["id"], ["Cafe", "cafe", "View"])
     assert [t["name"] for t in tag_model.get_bookmark_tags("u1", b["id"])] == ["Cafe", "View"]
     assert bm.get_bookmark("u1", b["id"])["updated_at"] > "2020-01-01 00:00:00"
-    assert sorted(bm.list_bookmarks("u1")[0]["tags"]) == ["Cafe", "View"]
+    assert sorted(t["name"] for t in bm.list_bookmarks("u1")[0]["tags"]) == ["Cafe", "View"]
     counts = {t["name"]: t["usage_count"] for t in tag_model.get_tags_with_counts("u1")}
     assert counts == {"Cafe": 1, "View": 1}
     tag_model.set_bookmark_tags("u1", b["id"], ["View"])

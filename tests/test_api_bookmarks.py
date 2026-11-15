@@ -20,7 +20,9 @@ def test_create_get_list(client):
     assert g.status_code == 200 and g.get_json()["photos"] == []
     lst = client.get("/api/bookmarks", headers=A).get_json()
     assert len(lst) == 1 and lst[0]["photo_count"] == 0 and lst[0]["thumb_url"] is None
-    assert sorted(lst[0]["tags"]) == ["Food", "Rest"]
+    assert sorted(t["name"] for t in lst[0]["tags"]) == ["Food", "Rest"]
+    assert lst[0]["tags"] == sorted(g.get_json()["tags"], key=lambda t: t["name_lower"])
+    assert set(lst[0]["tags"][0]) == {"id", "user_id", "name", "name_lower"}
 
 
 def test_list_ordered_by_updated(client):
@@ -74,7 +76,7 @@ def test_tags_put_and_cloud(client):
 
 
 def test_cross_user_404(client):
-    b = _mk(client).get_json()
+    b = _mk(client, tags=["keep"]).get_json()
     i = b["id"]
     assert client.get(f"/api/bookmarks/{i}", headers=B).status_code == 404
     assert client.patch(f"/api/bookmarks/{i}", json={"name": "x"}, headers=B).status_code == 404
@@ -82,6 +84,8 @@ def test_cross_user_404(client):
     assert client.delete(f"/api/bookmarks/{i}", headers=B).status_code == 404
     assert client.get("/api/bookmarks", headers=B).get_json() == []
     assert client.get(f"/api/bookmarks/{i}", headers=A).status_code == 200
+    assert [t["name"] for t in client.get(f"/api/bookmarks/{i}", headers=A).get_json()["tags"]] == ["keep"]
+    assert client.get("/api/tags", headers=B).get_json() == []
     assert client.get("/api/bookmarks/99999", headers=A).status_code == 404
 
 
