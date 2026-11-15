@@ -1189,6 +1189,11 @@ async function main() {
   if (arrivedWithRouteId) titleInput.disabled = true;
   const freshTitle = titleInput.value.trim() || 'Untitled Route';
   state.savedTitle = null;
+  // Create the map before any awaited fetch below: creating it after the
+  // route/title round trip made a Playwright wait started right after the
+  // first Generate click miss the drawn legs (line-drag regression test).
+  // The map makes no requests; the load-error panel hides it.
+  state.map = initCreateMap('map');
   state.routeId = await ensureRouteId();
   if (state.routeId === null) { showRouteLoadError('not-found'); return; }
   if (arrivedWithRouteId) {
@@ -1204,7 +1209,6 @@ async function main() {
   } else {
     state.savedTitle = freshTitle;
   }
-  state.map = initCreateMap('map');
 
   // Playwright + debug hook: expose state so tests can assert on or
   // nudge it without reimplementing the whole edit/generate cycle.
