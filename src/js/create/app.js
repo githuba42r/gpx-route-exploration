@@ -113,6 +113,29 @@ async function ensureRouteId() {
   return route.id;
 }
 
+const TITLE_SUFFIX = ' \u2014 GPX Route Exploration';
+
+// Write the title to every surface that shows it. textContent/.value only:
+// route titles are user data.
+function applyTitle(title) {
+  document.getElementById('route-title').value = title;
+  document.getElementById('nav-route-title').textContent = title;
+  document.title = title + TITLE_SUFFIX;
+}
+
+// Fetch the existing route's title and populate the title surfaces.
+// Returns the title, or null on failure (input left as is, nothing saved).
+async function loadRouteTitle(routeId) {
+  try {
+    const route = await api.getRoute(routeId);
+    applyTitle(route.title);
+    return route.title;
+  } catch (err) {
+    console.error('Could not load route title', err);
+    return null;
+  }
+}
+
 // -------------------- drawing --------------------
 
 function updatePreviewLine(state) {
@@ -1141,7 +1164,16 @@ async function main() {
   const arrivedWithRouteId = new URL(window.location.href)
     .searchParams.has('route_id');
 
+  const titleInput = document.getElementById('route-title');
+  // Not editable until the saved title is known, so a typed edit can't be
+  // lost or clobbered by the arriving fetch.
+  if (arrivedWithRouteId) titleInput.disabled = true;
+  const freshTitle = titleInput.value.trim() || 'Untitled Route';
+  state.savedTitle = null;
   state.routeId = await ensureRouteId();
+  // Runs in parallel with map creation; awaited before the blur handler.
+  const titleLoad = arrivedWithRouteId ? loadRouteTitle(state.routeId) : null;
+  if (!arrivedWithRouteId) state.savedTitle = freshTitle;
   state.map = initCreateMap('map');
 
   // Playwright + debug hook: expose state so tests can assert on or
@@ -1337,14 +1369,32 @@ async function main() {
     await onWaypointsChanged(state, editor);
   });
 
-  // --- Title blur → persist ---
-  document.getElementById('route-title').addEventListener('blur', async (e) => {
+  // --- Title blur → persist (only a changed, non-blank title) ---
+  if (titleLoad) {
+    state.savedTitle = await titleLoad;
+    titleInput.disabled = false;
+  }
+  titleInput.addEventListener('blur', async (e) => {
+    if (state.savedTitle === null) return; // title never loaded: don't PATCH
     const title = e.target.value.trim();
-    if (!title) return;
-    await fetch(`/api/routes/${state.routeId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    });
+    if (!title) { e.target.value = state.savedTitle; return; }
+    if (title === state.savedTitle) return;
+    try {
+      const res = await fetch(`/api/routes/${state.routeId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error(`PATCH returned ${res.status}`);
+    } catch (err) {
+      console.error('Could not save title', err);
+      const el = document.getElementById('generate-error');
+      el.textContent = 'Could not save title';
+      el.style.display = 'block';
+      return;
+    }
+    state.savedTitle = title;
+    applyTitle(title);
+    clearError();
   });
 
   // --- Save (no-op; edits already persist per-action) ---

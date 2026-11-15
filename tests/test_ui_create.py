@@ -1036,3 +1036,117 @@ def test_line_drag_inserts_between_correct_pair_on_multi_waypoint_route(page, se
     positions = [w["position"] for w in listing]
     assert positions == [0, 1, 2, 3, 4, 5, 6], positions
     assert listing[5]["kind"] == "waypoint", listing[5]
+
+
+# ---- route title load / persist (create-title fix, Task 1) ----
+
+def _seed_route(server_url, title):
+    r = http_requests.post(f"{server_url}/api/routes",
+                           json={"title": title, "profile": "bicycle"})
+    assert r.status_code in (200, 201), r.text
+    return r.json()["id"]
+
+
+def _api_title(server_url, rid):
+    return http_requests.get(f"{server_url}/api/routes/{rid}").json()["title"]
+
+
+def _open_create(page, server_url, rid):
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(f"{server_url}/create?route_id={rid}")
+    page.wait_for_function("() => window.__appReady === true", timeout=8000)
+
+
+def _track_patches(page, rid):
+    patches = []
+    page.on("request", lambda req: patches.append(req)
+            if req.method == "PATCH" and req.url.endswith(f"/api/routes/{rid}")
+            else None)
+    return patches
+
+
+def test_create_page_shows_existing_route_title(page, server_url):
+    rid = _seed_route(server_url, "Seeded Ride Title")
+    _open_create(page, server_url, rid)
+    expect(page.locator("#route-title")).to_have_value("Seeded Ride Title")
+    expect(page.locator("#nav-route-title")).to_have_text("Seeded Ride Title")
+    assert "Seeded Ride Title" in page.title()
+
+
+def test_title_blur_without_edit_sends_no_patch(page, server_url):
+    rid = _seed_route(server_url, "Keep Me As Is")
+    patches = _track_patches(page, rid)
+    _open_create(page, server_url, rid)
+    page.locator("#route-title").click()
+    page.locator("#route-title").blur()
+    page.wait_for_timeout(300)
+    assert patches == []
+    assert _api_title(server_url, rid) == "Keep Me As Is"
+
+
+def test_title_edit_saves_once_and_updates_nav(page, server_url):
+    rid = _seed_route(server_url, "Old Title")
+    patches = _track_patches(page, rid)
+    _open_create(page, server_url, rid)
+    page.locator("#route-title").fill("New Title")
+    page.locator("#route-title").blur()
+    page.wait_for_function(
+        "() => document.getElementById('nav-route-title').textContent === 'New Title'")
+    assert len(patches) == 1
+    assert _api_title(server_url, rid) == "New Title"
+    assert "New Title" in page.title()
+
+
+def test_blank_title_reverts_and_does_not_save(page, server_url):
+    rid = _seed_route(server_url, "Blank Test")
+    patches = _track_patches(page, rid)
+    _open_create(page, server_url, rid)
+    page.locator("#route-title").fill("   ")
+    page.locator("#route-title").blur()
+    expect(page.locator("#route-title")).to_have_value("Blank Test")
+    assert patches == []
+    assert _api_title(server_url, rid) == "Blank Test"
+
+
+def test_title_save_failure_keeps_text_and_shows_error(page, server_url):
+    rid = _seed_route(server_url, "Fail Test")
+    _open_create(page, server_url, rid)
+    handler = lambda route: route.fulfill(status=500, body="boom")
+    page.route(f"**/api/routes/{rid}", lambda route: handler(route)
+               if route.request.method == "PATCH" else route.continue_())
+    page.locator("#route-title").fill("Typed Title")
+    page.locator("#route-title").blur()
+    expect(page.locator("#generate-error")).to_be_visible()
+    expect(page.locator("#generate-error")).to_contain_text("Could not save title")
+    expect(page.locator("#route-title")).to_have_value("Typed Title")
+    assert _api_title(server_url, rid) == "Fail Test"
+    page.unroute(f"**/api/routes/{rid}")
+    page.locator("#route-title").focus()
+    page.locator("#route-title").blur()
+    page.wait_for_function(
+        "() => document.getElementById('nav-route-title').textContent === 'Typed Title'")
+    assert _api_title(server_url, rid) == "Typed Title"
+
+
+def test_hostile_title_renders_as_text(page, server_url):
+    hostile = "<img src=x onerror=window.__pwn=1>"
+    rid = _seed_route(server_url, hostile)
+    _open_create(page, server_url, rid)
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => window.__pwn") is None
+    expect(page.locator("#route-title")).to_have_value(hostile)
+    expect(page.locator("#nav-route-title")).to_have_text(hostile)
+
+
+def test_new_route_unchanged(page, server_url):
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    patches = []
+    page.on("request", lambda req: patches.append(req) if req.method == "PATCH" else None)
+    page.goto(f"{server_url}/create")
+    page.wait_for_function("() => window.__appReady === true", timeout=8000)
+    expect(page.locator("#route-title")).to_have_value("Untitled Route")
+    expect(page.locator("#nav-route-title")).to_have_text("New Route")
+    page.locator("#route-title").click()
+    page.locator("#route-title").blur()
+    page.wait_for_timeout(300)
+    assert patches == []
