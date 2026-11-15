@@ -638,20 +638,31 @@ def test_legend_scrolls_horizontally(mobile_page, server_url):
     assert_no_hscroll(mobile_page)
 
 
+def _pane_transform(page):
+    return page.evaluate("document.querySelector('#map .leaflet-map-pane').style.transform")
+
+
 def test_profile_tap_pins_hover_info(mobile_page, server_url):
     rid = make_analysis_route(server_url)
-    _goto_analysis_ready(mobile_page, server_url, rid)
-    x, y = _profile_point(mobile_page, 0.5, 0.5)
+    # tall viewport: profile and #stats both visible without scrolling
+    _goto_analysis_ready(mobile_page, server_url, rid, h=1500)
+    # zoom the map in so a pan to the tapped point is observable
+    mobile_page.evaluate("document.querySelector('.leaflet-control-zoom-in').click()")
+    mobile_page.wait_for_timeout(600)
+    before = _pane_transform(mobile_page)
+    x, y = _profile_point(mobile_page, 0.9, 0.5)
     assert not mobile_page.locator("#hover-info").is_visible()
     mobile_page.touchscreen.tap(x, y)
-    mobile_page.wait_for_timeout(300)
+    mobile_page.wait_for_timeout(250)
+    # only the pointer path pans the map and keeps info pinned after touch end
     assert mobile_page.locator("#hover-info").is_visible()
     assert mobile_page.locator("#hi-dist").inner_text().endswith("km")
-    # tap on the map dismisses it
-    mobile_page.evaluate("window.scrollTo(0, 0)")
-    mobile_page.wait_for_timeout(200)
-    mb = _box(mobile_page, "#map")
-    mobile_page.touchscreen.tap(mb["x"] + 40, mb["y"] + mb["height"] - 40)
+    assert _pane_transform(mobile_page) != before
+    # tap a non-interactive area outside the map straight away (inside the
+    # compat-mouse guard window): only the document-level pointerdown
+    # dismissal can hide it
+    sb = _box(mobile_page, "#stats")
+    mobile_page.touchscreen.tap(sb["x"] + 4, sb["y"] + 4)
     mobile_page.wait_for_timeout(300)
     assert not mobile_page.locator("#hover-info").is_visible()
 

@@ -74,39 +74,14 @@ export function initMapHoverPanel(map, points, segmentLayers, baseRoute, gradSec
     });
   });
 
-  // Touch: a tap fires no mouseover/mouseout pair, so a tap on a segment pins
-  // its highlight + info and a tap elsewhere on the map clears it.
-  let tappedLine = null;
-  let baseTapped = false;
-  segmentLayers.forEach(line => {
-    line.on('click', () => {
-      if (tappedLine && tappedLine !== line) tappedLine.setStyle({ weight: 4 });
-      tappedLine = line;
-      line.setStyle({ weight: 7 });
-      updateMapHover(line._pointIndex);
-      line._tapJustPinned = true;
-      setTimeout(() => { line._tapJustPinned = false; }, 0);
-    });
-  });
-  map.on('click', () => {
-    if (baseTapped || (tappedLine && tappedLine._tapJustPinned)) return;
-    if (tappedLine) { tappedLine.setStyle({ weight: 4 }); tappedLine = null; }
-    clearMapHover();
-  });
-
-  function nearestIdx(ll) {
+  baseRoute.on('mouseover', (e) => {
+    const ll = e.latlng;
     let bestIdx = 0, bestDist = Infinity;
     for (let i = 0; i < points.length; i++) {
       const d = (points[i].lat - ll.lat) ** 2 + (points[i].lon - ll.lng) ** 2;
       if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
-    return bestIdx;
-  }
-  baseRoute.on('mouseover', (e) => updateMapHover(nearestIdx(e.latlng)));
-  baseRoute.on('click', (e) => {
-    updateMapHover(nearestIdx(e.latlng));
-    baseTapped = true;
-    setTimeout(() => { baseTapped = false; }, 0);
+    updateMapHover(bestIdx);
   });
   baseRoute.on('mouseout', () => clearMapHover());
 }
